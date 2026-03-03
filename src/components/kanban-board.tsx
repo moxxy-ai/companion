@@ -56,6 +56,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import ThemeToggle from "@/components/theme-toggle";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
@@ -307,10 +308,12 @@ export default function KanbanBoard() {
                 <Sparkles className="size-3.5" /> Premium Workflow
               </div>
               <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">TaskFlow Kanban</h1>
-              <p className="text-sm text-muted-foreground mt-1">A classy modern board for your team's daily execution.</p>
+              <p className="text-sm text-muted-foreground mt-1">A classy modern board for your team&apos;s daily execution.</p>
             </div>
 
-            <Dialog open={open} onOpenChange={setOpen}>
+            <div className="flex items-center gap-2 self-start md:self-auto">
+              <ThemeToggle />
+              <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
                 <Button className="rounded-2xl"><CirclePlus className="size-4" /> New Task</Button>
               </DialogTrigger>
@@ -368,6 +371,7 @@ export default function KanbanBoard() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+            </div>
           </div>
 
           <Separator className="my-5" />
