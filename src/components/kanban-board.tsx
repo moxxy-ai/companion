@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -59,19 +59,13 @@ import { Separator } from "@/components/ui/separator";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
-
-export type TaskPriority = "low" | "medium" | "high";
-export type TaskStatus = "todo" | "in_progress" | "review" | "done";
-
-export type Task = {
-  id: string;
-  title: string;
-  description: string;
-  status: TaskStatus;
-  priority: TaskPriority;
-  dueDate?: string;
-  tags: string[];
-};
+import {
+  loadTasksFromIndexedDB,
+  saveTasksToIndexedDB,
+  type Task,
+  type TaskPriority,
+  type TaskStatus,
+} from "@/lib/indexeddb";
 
 const COLUMNS: { id: TaskStatus; title: string }[] = [
   { id: "todo", title: "Backlog" },
@@ -185,7 +179,8 @@ function SortableTaskCard({
 }
 
 export default function KanbanBoard() {
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [isHydrated, setIsHydrated] = useState(false);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [search, setSearch] = useState("");
   const [priorityFilter, setPriorityFilter] = useState<"all" | TaskPriority>("all");
@@ -198,6 +193,44 @@ export default function KanbanBoard() {
     dueDate: "",
     tags: "",
   });
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function hydrateTasks() {
+      try {
+        const persistedTasks = await loadTasksFromIndexedDB();
+        if (!mounted) return;
+
+        if (persistedTasks.length > 0) {
+          setTasks(persistedTasks);
+        } else {
+          setTasks(initialTasks);
+          await saveTasksToIndexedDB(initialTasks);
+        }
+      } catch {
+        if (mounted) {
+          setTasks(initialTasks);
+          toast.error("Could not read offline data. Using default board data.");
+        }
+      } finally {
+        if (mounted) setIsHydrated(true);
+      }
+    }
+
+    hydrateTasks();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+
+    saveTasksToIndexedDB(tasks).catch(() => {
+      toast.error("Could not save offline board data.");
+    });
+  }, [tasks, isHydrated]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
