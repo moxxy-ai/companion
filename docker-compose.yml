@@ -1,0 +1,20 @@
+services:
+  companion:
+    build: .
+    image: companion:local
+    restart: unless-stopped
+    ports:
+      - "8901:8901"
+    env_file:
+      - .env
+    environment:
+      COMPANION_HOME: /data
+      COMPANION_HOST: 0.0.0.0
+      COMPANION_PORT: 8901
+    volumes:
+      - companion-data:/data
+      # Optional: mount your host SSH config if private Git remotes should use SSH.
+      # - ~/.ssh:/root/.ssh:ro
+
+volumes:
+  companion-data:

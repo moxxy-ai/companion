@@ -21,17 +21,18 @@ const MIME: Record<string, string> = {
 /**
  * The one companiond server: /api REST (typed route table + RBAC), /ws SPA
  * socket (upgrade, session-token auth), GitHub webhooks (HMAC auth), and the
- * built SPA as static files (dev uses Vite with a proxy instead). Binds
- * 127.0.0.1 only — loopback plus login is the trust boundary.
+ * built SPA as static files (dev uses Vite with a proxy instead). By default
+ * it binds 127.0.0.1; Docker sets the host to 0.0.0.0 so published ports work.
  */
 export function startHttpServer(opts: {
+  host: string;
   port: number;
   deps: ApiDeps;
   hub: SpaHub;
   /** Directory of the built SPA (apps/web/dist); optional in dev. */
   staticDir?: string;
 }): Promise<Server> {
-  const { port, deps, hub, staticDir } = opts;
+  const { host, port, deps, hub, staticDir } = opts;
   const router = new Router(buildRoutes(deps), deps.auth);
 
   const server = createServer((req, res) => {
@@ -68,8 +69,8 @@ export function startHttpServer(opts: {
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => {
-      log.info(`listening on http://127.0.0.1:${port}`);
+    server.listen(port, host, () => {
+      log.info(`listening on http://${host}:${port}`);
       resolve(server);
     });
   });

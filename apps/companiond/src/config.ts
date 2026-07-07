@@ -38,7 +38,9 @@ export interface UserCredential {
 }
 
 export interface DaemonConfig {
-  /** Port the companiond HTTP+WS server binds on 127.0.0.1. */
+  /** Host the companiond HTTP+WS server binds on. */
+  host: string;
+  /** Port the companiond HTTP+WS server binds on. */
   port: number;
   /** Max concurrently live gateway processes. */
   maxLiveRuns: number;
@@ -51,11 +53,13 @@ export interface DaemonConfig {
 }
 
 const DEFAULTS = {
+  host: '127.0.0.1',
   port: 8901,
   maxLiveRuns: 3,
 };
 
 interface StoredConfig {
+  host?: string;
   port?: number;
   maxLiveRuns?: number;
   moxxyCliPath?: string;
@@ -97,6 +101,7 @@ export function loadDaemonConfig(): DaemonConfig {
   const users = resolveUsers(env);
 
   return {
+    host: env.COMPANION_HOST?.trim() || stored.host || DEFAULTS.host,
     port: numberFrom(env.COMPANION_PORT) ?? stored.port ?? DEFAULTS.port,
     maxLiveRuns: stored.maxLiveRuns ?? DEFAULTS.maxLiveRuns,
     moxxyCliPath: stored.moxxyCliPath,

@@ -112,6 +112,7 @@ async function main(): Promise<void> {
   const here = dirname(fileURLToPath(import.meta.url));
   const builtSpa = join(here, '..', '..', 'web', 'dist');
   const server = await startHttpServer({
+    host: config.host,
     port: config.port,
     deps: {
       config,
