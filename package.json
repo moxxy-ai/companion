@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Companion — a maintainer's GUI that manages a GitHub repository with moxxy agents",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "pnpm --parallel --filter companiond --filter companion-web dev",
