@@ -5,3 +5,7 @@ dist/
 *.tsbuildinfo
 .env
 .env.local
+
+# Claude Code local/runtime files (the shared skills/agents live under .ai/)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
