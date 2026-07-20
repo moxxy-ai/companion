@@ -58,6 +58,8 @@ export class BoardService {
   /** Failed attempts cool down before redispatch — a fast-dying runner
    *  environment must not burn the whole attempt ceiling in seconds. */
   private readonly retryBackoff = new Map<string, number>();
+  /** Heartbeat-discovered blockers must alert once, not every reconcile pass. */
+  private readonly notifiedBlockers = new Set<string>();
   private disposed = false;
 
   constructor(
@@ -455,7 +457,20 @@ export class BoardService {
       if (Date.now() < (this.retryBackoff.get(task.id) ?? 0)) continue;
       const ws = this.workspaceOf(task.repo);
       const free = ws ? freeByWs.get(ws) : undefined;
-      if (!free || free.size === 0) continue;
+      if (!free || free.size === 0) {
+        const hasDeveloper = ws
+          ? this.store.listWorkers(ws).some((worker) => worker.enabled && worker.role === 'developer')
+          : false;
+        if (!hasDeveloper) {
+          this.notifyBlocker(
+            task,
+            'developer',
+            'Board task is waiting for a developer',
+            `No enabled developer is available for ${task.title}. Add or enable a developer worker to start it.`,
+          );
+        }
+        continue;
+      }
       let worker: WorkerRecord | undefined;
       if (task.assignedWorkerId) {
         const sticky = this.store.getWorker(task.assignedWorkerId);
@@ -471,6 +486,7 @@ export class BoardService {
       } else {
         worker = free.values().next().value;
       }
+      this.clearBlocker(task.id, 'developer');
       if (!worker) continue;
       free.delete(worker.id);
       // Re-read: earlier iterations awaited run creation, and a human may have
@@ -670,7 +686,16 @@ ${acceptance}${specSection}
       if (task.stage === 'awaiting_review' && config.autoReview) {
         const reviewer = config.reviewerWorkerId ? this.store.getWorker(config.reviewerWorkerId) : undefined;
         // Review paused until a reviewer worker is configured and enabled.
-        if (!reviewer?.enabled || reviewer.role !== 'reviewer') continue;
+        if (!reviewer?.enabled || reviewer.role !== 'reviewer') {
+          this.notifyBlocker(
+            task,
+            'reviewer',
+            'Board task is waiting for a reviewer',
+            `PR #${task.prNumber} for ${task.title} needs review, but no enabled reviewer is configured.`,
+          );
+          continue;
+        }
+        this.clearBlocker(task.id, 'reviewer');
         if (Date.now() < (this.reviewBackoff.get(task.id) ?? 0)) continue;
         if (!this.reviewing.has(this.workspaceOf(task.repo) ?? '')) void this.runReview(task.id, reviewer.name);
         continue;
@@ -880,6 +905,13 @@ ${acceptance}${specSection}
       lastError: null,
     });
     this.store.insertEvent(taskId, stage === 'fix_ci' ? 'checks_failed' : 'changes_requested', `${reason} — bound back to its worker`);
+    this.notifyUser(
+      task.repo,
+      'info',
+      stage === 'fix_ci' ? `Board task is repairing CI: ${task.title.slice(0, 60)}` : `Board task is addressing review: ${task.title.slice(0, 60)}`,
+      `${reason}. The task has been returned to ${task.firstWorker ?? 'its developer'}.`,
+      `#/board?task=${taskId}`,
+    );
     this.changed();
     this.kick();
   }
@@ -907,6 +939,13 @@ ${acceptance}${specSection}
             : { status: 'ready', stage: 'build' };
       this.store.updateTask(taskId, { ...backTo, attempts, runId: null, assignedWorkerId: null, lastError: reason.slice(0, 500) });
       this.retryBackoff.set(taskId, Date.now() + RETRY_BACKOFF_MS);
+      this.notifyUser(
+        task.repo,
+        'error',
+        `Board task is retrying: ${task.title.slice(0, 60)}`,
+        `${reason.slice(0, 160)} · attempt ${attempts}/${config.maxAttempts}`,
+        `#/board?task=${taskId}`,
+      );
     }
     this.changed();
     this.kick();
@@ -915,6 +954,7 @@ ${acceptance}${specSection}
   private complete(taskId: string, how: string): void {
     const task = this.store.getTask(taskId);
     if (!task) return;
+    this.clearBlockers(taskId);
     this.mergeBackoff.delete(taskId);
     this.reviewBackoff.delete(taskId);
     this.retryBackoff.delete(taskId);
@@ -927,6 +967,7 @@ ${acceptance}${specSection}
   private fail(taskId: string, reason: string, extra?: TaskPatch): void {
     const task = this.store.getTask(taskId);
     if (!task) return;
+    this.clearBlockers(taskId);
     this.mergeBackoff.delete(taskId);
     this.reviewBackoff.delete(taskId);
     this.retryBackoff.delete(taskId);
@@ -940,6 +981,24 @@ ${acceptance}${specSection}
 
   private changed(): void {
     this.broadcast({ t: 'board.changed' });
+  }
+
+  /** Periodic blockers remain actionable but produce only one inbox entry. */
+  private notifyBlocker(task: TaskRecord, blocker: string, title: string, body: string): void {
+    const key = `${task.id}:${blocker}`;
+    if (this.notifiedBlockers.has(key)) return;
+    this.notifiedBlockers.add(key);
+    this.notifyUser(task.repo, 'action_required', title, body, `#/board?task=${task.id}`);
+  }
+
+  private clearBlocker(taskId: string, blocker: string): void {
+    this.notifiedBlockers.delete(`${taskId}:${blocker}`);
+  }
+
+  private clearBlockers(taskId: string): void {
+    for (const key of this.notifiedBlockers) {
+      if (key.startsWith(`${taskId}:`)) this.notifiedBlockers.delete(key);
+    }
   }
 
   private notifyUser(repo: string, kind: 'finished' | 'error' | 'info' | 'action_required', title: string, body: string, href: string): void {
