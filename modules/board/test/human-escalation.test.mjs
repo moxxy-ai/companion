@@ -123,6 +123,32 @@ test('manage-protected API route rejects blank retry guidance', async (t) => {
   );
 });
 
+test('retry preserves fix_ci and passes guidance to the CI-fix worker', async (t) => {
+  let received;
+  const guidance = 'Reproduce the Linux-only check failure before changing the implementation.';
+  const { db, store, service } = fixture({ stage: 'fix_ci', prNumber: 13 });
+  t.after(() => { service.dispose(); db.close(); });
+  service.code.fixes.startCheckFix = async (...args) => {
+    received = args;
+    return { id: 'run-checks', branch: 'companion/pr-13' };
+  };
+  store.insertWorker({ id: 'wkr-dev', name: 'Developer', role: 'developer', enabled: true, createdAt: Date.now() });
+
+  const retried = await service.resolveFailure('tsk-test', 'retry', guidance);
+  assert.equal(retried.stage, 'fix_ci');
+  await service.tick();
+  assert.deepEqual(received, ['owner/repo', 13, guidance]);
+  assert.equal(store.getTask('tsk-test')?.runId, 'run-checks');
+});
+
+test('decision events retain the complete accepted guidance', async (t) => {
+  const { db, store, service } = fixture();
+  t.after(() => { service.dispose(); db.close(); });
+  const guidance = 'x'.repeat(10_000);
+  await service.resolveFailure('tsk-test', 'retry', guidance);
+  assert.equal(store.listEvents('tsk-test')[0]?.detail, guidance);
+});
+
 test('existing-PR retry passes guidance to the review-fix worker', async (t) => {
   let received;
   const { db, store, service } = fixture({

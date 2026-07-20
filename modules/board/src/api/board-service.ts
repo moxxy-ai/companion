@@ -238,16 +238,24 @@ export class BoardService {
     if (decision === 'retry' && !guidance) throw new Error('tell the next worker what to do differently');
 
     if (decision === 'retry') {
+      // Keep the exhausted work kind when possible: in particular, a failed
+      // fix_ci task must return to the CI repair flow rather than being
+      // misrouted to review remediation merely because it has a PR.
+      const retryStage = task.stage && WORK_STAGES.has(task.stage)
+        ? task.stage
+        : task.prNumber == null
+          ? 'build'
+          : 'address_review';
       this.store.updateTask(id, {
         status: 'ready',
-        stage: task.prNumber == null ? 'build' : 'address_review',
+        stage: retryStage,
         assignedWorkerId: null,
         attempts: 0,
         lastError: null,
         humanInstructions: guidance,
         finishedAt: null,
       });
-      this.store.insertEvent(id, 'human_retry', guidance.slice(0, 2_000));
+      this.store.insertEvent(id, 'human_retry', guidance);
     } else if (decision === 'backlog') {
       this.store.updateTask(id, {
         status: 'backlog',
@@ -256,7 +264,7 @@ export class BoardService {
         lastError: null,
         humanInstructions: guidance || null,
       });
-      this.store.insertEvent(id, 'human_parked', guidance.slice(0, 2_000) || 'parked after review');
+      this.store.insertEvent(id, 'human_parked', guidance || 'parked after review');
     } else {
       this.store.updateTask(id, {
         status: 'done',
@@ -267,7 +275,7 @@ export class BoardService {
         humanInstructions: guidance || null,
         finishedAt: Date.now(),
       });
-      this.store.insertEvent(id, 'human_done', guidance.slice(0, 2_000) || 'accepted after review');
+      this.store.insertEvent(id, 'human_done', guidance || 'accepted after review');
     }
     this.changed();
     this.kick();
@@ -490,7 +498,7 @@ export class BoardService {
       if (stage === 'address_review') {
         run = await this.code.fixes.startReviewFix(task.repo, task.prNumber!, task.humanInstructions ?? undefined);
       } else if (stage === 'fix_ci') {
-        run = await this.code.fixes.startCheckFix(task.repo, task.prNumber!);
+        run = await this.code.fixes.startCheckFix(task.repo, task.prNumber!, task.humanInstructions ?? undefined);
       } else {
         const repoRow = this.code.repos.get(task.repo);
         if (!repoRow) throw new Error(`repo ${task.repo} is not connected`);
@@ -770,7 +778,7 @@ This guidance comes from the maintainer after earlier attempts failed. Treat it 
     if (!task) return;
     // Same ceiling as attemptFail: the Nth cycle is allowed, the (N+1)th fails.
     if (task.attempts + 1 > config.maxAttempts) {
-      this.fail(taskId, `${reason} — attempt ceiling reached (${config.maxAttempts})`);
+      this.fail(taskId, `${reason} — attempt ceiling reached (${config.maxAttempts})`, { stage });
       return;
     }
     this.store.updateTask(taskId, {
@@ -835,7 +843,11 @@ This guidance comes from the maintainer after earlier attempts failed. Treat it 
     if (!task) return;
     this.mergeBackoff.delete(taskId);
     this.reviewBackoff.delete(taskId);
-    this.store.updateTask(taskId, { ...extra, status: 'failed', stage: null, runId: null, lastError: reason.slice(0, 500) });
+    // Preserve a work stage so an explicit retry resumes the operation that
+    // exhausted (notably fix_ci), while non-work review states remain unset.
+    const candidateStage = extra?.stage ?? task.stage;
+    const failedStage = candidateStage && WORK_STAGES.has(candidateStage) ? candidateStage : null;
+    this.store.updateTask(taskId, { ...extra, status: 'failed', stage: failedStage, runId: null, lastError: reason.slice(0, 500) });
     this.store.insertEvent(taskId, 'failed', reason.slice(0, 500));
     this.store.insertEvent(taskId, 'human_review_requested', 'automation cannot continue — waiting for a maintainer decision');
     this.notifyUser(

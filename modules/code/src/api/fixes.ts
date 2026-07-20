@@ -98,7 +98,7 @@ export class Fixes {
   // ---------- PR-branch repair runs -----------------------------------------------
 
   /** Agent repairs the failing CI on a PR, working directly on its branch. */
-  async startCheckFix(repo: string, prNumber: number): Promise<RunRecord> {
+  async startCheckFix(repo: string, prNumber: number, maintainerGuidance?: string): Promise<RunRecord> {
     const { pr, client } = this.requireOpenPr(repo, prNumber);
     const summary = await this.checks.fetchSummary(repo, prNumber);
     const failing = summary.runs.filter(
@@ -109,7 +109,7 @@ export class Fixes {
     return this.createPrBranchRun(
       pr,
       `Fix CI on PR #${prNumber}: ${pr.title.slice(0, 50)}`,
-      checkFixObjective(pr, failing, clip(diff)),
+      checkFixObjective(pr, failing, clip(diff), maintainerGuidance),
     );
   }
 
@@ -251,15 +251,19 @@ function checkFixObjective(
   pr: PrRecord,
   failing: ReadonlyArray<{ name: string; conclusion: string | null; detailsUrl: string | null }>,
   diff: string,
+  maintainerGuidance?: string,
 ): string {
   const list = failing
     .map((f) => `- ${f.name}: ${f.conclusion ?? 'failed'}${f.detailsUrl ? ` (${f.detailsUrl})` : ''}`)
     .join('\n');
+  const guidance = maintainerGuidance?.trim()
+    ? `\n## Maintainer guidance after earlier attempts failed\n${maintainerGuidance.trim()}\n\nTreat this guidance as authoritative and explicitly address it in your final summary.\n`
+    : '';
   return `You are an autonomous software engineer working in a git worktree checked out AT the head of pull request #${pr.number} ("${pr.title}", branch ${pr.headRef}). The PR's CI is failing; your job is to make it pass without changing what the PR intends to do.
 
 ## Failing pipelines
 ${list}
-
+${guidance}
 ## The PR's diff (for context — this work is already on your branch)
 \`\`\`diff
 ${diff}
