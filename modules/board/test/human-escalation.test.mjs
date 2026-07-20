@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import { BoardService } from '../dist/api/board-service.js';
 import { BoardStore } from '../dist/api/board-store.js';
 import migrations from '../dist/api/migrations.js';
+import routes from '../dist/api/routes.js';
 
 function migrate(db) {
   for (const migration of migrations) migration.up(db, { moduleId: 'board' });
@@ -77,6 +78,68 @@ test('migration adds and persists human_instructions on an existing v1 schema', 
   assert.ok(db.prepare("SELECT 1 FROM pragma_table_info('board_tasks') WHERE name = 'human_instructions'").get());
   // The migration is deliberately idempotent for databases repaired/replayed by operators.
   migrations[1].up(db, { moduleId: 'board' });
+});
+
+test('manage-protected API route resolves a visible failed task', async (t) => {
+  const { db, store, service } = fixture();
+  t.after(() => { service.dispose(); db.close(); });
+  const route = routes({
+    services: {
+      get: (id) => {
+        if (id === 'board') return service;
+        if (id === 'workspace') return { canAccessRepo: () => true };
+        throw new Error(`unexpected service ${id}`);
+      },
+    },
+  }).find((candidate) => candidate.path === '/api/board/tasks/:id/resolve-failure');
+  assert.ok(route);
+  assert.equal(route.method, 'POST');
+  assert.equal(route.access, 'board:manage');
+  const result = await route.run(
+    { id: 'tsk-test' },
+    new URLSearchParams(),
+    { decision: 'retry', instructions: 'Follow the API-provided guidance' },
+    { username: 'maintainer' },
+    null,
+  );
+  assert.equal(result.task.status, 'ready');
+  assert.equal(store.listEvents('tsk-test')[0]?.kind, 'human_retry');
+});
+
+test('manage-protected API route rejects blank retry guidance', async (t) => {
+  const { db, service } = fixture();
+  t.after(() => { service.dispose(); db.close(); });
+  const route = routes({
+    services: {
+      get: (id) => id === 'board' ? service : { canAccessRepo: () => true },
+    },
+  }).find((candidate) => candidate.path === '/api/board/tasks/:id/resolve-failure');
+  await assert.rejects(
+    route.run(
+      { id: 'tsk-test' }, new URLSearchParams(), { decision: 'retry', instructions: '   ' },
+      { username: 'maintainer' }, null,
+    ),
+    (error) => error.status === 400 && /what to do differently/.test(error.message),
+  );
+});
+
+test('existing-PR retry passes guidance to the review-fix worker', async (t) => {
+  let received;
+  const { db, store, service } = fixture({
+    status: 'ready', stage: 'address_review', prNumber: 13,
+    humanInstructions: 'Use the maintainer reproduction steps even without GitHub comments.',
+  });
+  t.after(() => { service.dispose(); db.close(); });
+  service.code.fixes.startReviewFix = async (...args) => {
+    received = args;
+    return { id: 'run-review', branch: 'companion/pr-13' };
+  };
+  store.insertWorker({ id: 'wkr-dev', name: 'Developer', role: 'developer', enabled: true, createdAt: Date.now() });
+  await service.tick();
+  assert.deepEqual(received, [
+    'owner/repo', 13, 'Use the maintainer reproduction steps even without GitHub comments.',
+  ]);
+  assert.equal(store.getTask('tsk-test')?.runId, 'run-review');
 });
 
 test('saved guidance is included in the next fresh-worker objective', (t) => {
