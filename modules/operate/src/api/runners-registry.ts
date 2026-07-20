@@ -143,9 +143,12 @@ export class Runners {
 
     const online = (row: RunnerRow): boolean => {
       const h = this.health.get(row.id);
-      // Unprobed runners are optimistically allowed (first placement before
-      // the first poll); offline ones are skipped.
-      return !h || h.status === 'online' || h.status === 'degraded' || h.status === 'unknown';
+      // Remote runners must complete a successful probe before placement. An
+      // unprobed or degraded remote may speak an older agent protocol and
+      // silently discard prompt fields it does not understand (such as image
+      // attachments). The in-process local runner is safe to use immediately.
+      if (!h || h.status === 'unknown') return row.id === LOCAL_RUNNER_ID;
+      return h.status === 'online';
     };
     // A runner is usable only if it has a credential-ready provider (its
     // catalog says so). Unknown catalog (never probed) stays optimistic.
@@ -186,8 +189,10 @@ export class Runners {
   totalCapacity(): number {
     const online = (row: RunnerRow): boolean => {
       const h = this.health.get(row.id);
-      // Unprobed (unknown) runners count optimistically, matching placement.
-      return !h || h.status === 'online' || h.status === 'degraded' || h.status === 'unknown';
+      // Remote capacity is counted only after a successful, protocol-compatible
+      // probe. The in-process local runner remains available during startup.
+      if (!h || h.status === 'unknown') return row.id === LOCAL_RUNNER_ID;
+      return h.status === 'online';
     };
     let sum = 0;
     for (const row of this.store.runners.list()) {
