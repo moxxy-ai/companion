@@ -33,6 +33,8 @@ export const boardApi = {
     fields: { title?: string; description?: string; specId?: string | null; priority?: TaskPriority },
   ) => patch<{ task: TaskRecord }>(`/api/board/tasks/${id}`, fields),
   moveTask: (id: string, to: TaskStatus) => post<{ task: TaskRecord }>(`/api/board/tasks/${id}/move`, { to }),
+  resolveFailure: (id: string, decision: 'retry' | 'backlog' | 'done', instructions: string) =>
+    post<{ task: TaskRecord }>(`/api/board/tasks/${id}/resolve-failure`, { decision, instructions }),
   deleteTask: (id: string) => del<{ ok: true }>(`/api/board/tasks/${id}`),
   specs: (repo: string) => request<{ specs: SpecOption[] }>(`/api/board/specs/${repo}`),
   createWorker: (name: string, role: WorkerRole) => post<{ worker: WorkerRecord }>('/api/board/workers', { name, role }),

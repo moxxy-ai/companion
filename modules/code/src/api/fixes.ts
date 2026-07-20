@@ -114,7 +114,7 @@ export class Fixes {
   }
 
   /** Agent implements the changes human reviewers asked for on a PR. */
-  async startReviewFix(repo: string, prNumber: number): Promise<RunRecord> {
+  async startReviewFix(repo: string, prNumber: number, maintainerGuidance?: string): Promise<RunRecord> {
     const { pr, client } = this.requireOpenPr(repo, prNumber);
     const [reviews, inline] = await Promise.all([
       client.prReviewList(repo, prNumber),
@@ -126,14 +126,14 @@ export class Fixes {
     const comments = inline.map(
       (c) => `- ${c.path}:${c.line ?? c.original_line ?? '?'} (${c.user?.login ?? 'reviewer'}): ${c.body.trim()}`,
     );
-    if (feedback.length === 0 && comments.length === 0) {
+    if (feedback.length === 0 && comments.length === 0 && !maintainerGuidance?.trim()) {
       throw new Error('no human review feedback found on this PR');
     }
     const diff = await client.prDiff(repo, prNumber);
     return this.createPrBranchRun(
       pr,
       `Address reviews on PR #${prNumber}: ${pr.title.slice(0, 45)}`,
-      reviewFixObjective(pr, feedback, comments, clip(diff)),
+      reviewFixObjective(pr, feedback, comments, clip(diff), maintainerGuidance),
     );
   }
 
@@ -273,7 +273,16 @@ ${diff}
 - Finish with a short summary: cause of each failure, what you changed, and how you verified it.`;
 }
 
-function reviewFixObjective(pr: PrRecord, feedback: readonly string[], comments: readonly string[], diff: string): string {
+function reviewFixObjective(
+  pr: PrRecord,
+  feedback: readonly string[],
+  comments: readonly string[],
+  diff: string,
+  maintainerGuidance?: string,
+): string {
+  const guidance = maintainerGuidance?.trim()
+    ? `\n## Maintainer guidance after earlier attempts failed\n${maintainerGuidance.trim()}\n\nTreat this guidance as authoritative and explicitly address it in your final summary.\n`
+    : '';
   return `You are an autonomous software engineer working in a git worktree checked out AT the head of pull request #${pr.number} ("${pr.title}", branch ${pr.headRef}). Human reviewers asked for changes; implement them.
 
 ## Review feedback
@@ -281,7 +290,7 @@ ${feedback.join('\n\n') || '(none beyond the inline comments)'}
 
 ## Inline comments (file:line)
 ${comments.join('\n') || '(none)'}
-
+${guidance}
 ## The PR's diff (for context — this work is already on your branch)
 \`\`\`diff
 ${diff}

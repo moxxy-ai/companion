@@ -45,8 +45,8 @@ const COLUMNS: ReadonlyArray<{ key: TaskStatus; label: string }> = [
 /** Human drag targets, mirroring the server's moveTask validation. */
 function canMove(task: TaskRecord, to: TaskStatus): boolean {
   if (to === task.status) return false;
-  if (to === 'ready') return ['backlog', 'failed', 'in_review'].includes(task.status);
-  if (to === 'backlog') return ['ready', 'failed', 'in_review', 'in_progress'].includes(task.status);
+  if (to === 'ready') return ['backlog', 'in_review'].includes(task.status);
+  if (to === 'backlog') return ['ready', 'in_review', 'in_progress'].includes(task.status);
   if (to === 'done') return task.status === 'in_review';
   return false;
 }
@@ -443,6 +443,8 @@ function TaskDetailModal({
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [failureInstructions, setFailureInstructions] = useState('');
+  const [resolvingFailure, setResolvingFailure] = useState(false);
   const { confirmDanger, confirmElement } = useConfirm();
 
   const refresh = useCallback(async () => {
@@ -473,6 +475,24 @@ function TaskDetailModal({
     setEditing(false);
   });
 
+  const resolveFailure = async (decision: 'retry' | 'backlog' | 'done'): Promise<void> => {
+    if (decision === 'retry' && !failureInstructions.trim()) {
+      onError('Tell the next worker what to do differently before retrying.');
+      return;
+    }
+    setResolvingFailure(true);
+    try {
+      await boardApi.resolveFailure(id, decision, failureInstructions);
+      setFailureInstructions('');
+      onError(null);
+      await refresh();
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setResolvingFailure(false);
+    }
+  };
+
   return (
     <Modal title={task.title} onClose={onClose} wide>
       <div className="flex flex-col gap-4">
@@ -499,6 +519,49 @@ function TaskDetailModal({
         </div>
 
         {task.lastError ? <ErrorBar error={task.lastError} /> : null}
+
+        {task.status === 'failed' ? (
+          <section className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+            <div>
+              <h3 className="text-sm font-semibold">Maintainer decision required</h3>
+              <p className="dim mt-1 text-xs">
+                Automation cannot continue until you retry with guidance, park the task in Backlog, or accept the current result as done.
+              </p>
+            </div>
+            <Field label="Guidance" hint="Required for retry. Tell the next worker what to do differently; optional for park or done.">
+              <textarea
+                className="input min-h-24"
+                value={failureInstructions}
+                onChange={(e) => setFailureInstructions(e.target.value)}
+                placeholder="Investigate the failing integration first, then…"
+                maxLength={10_000}
+                disabled={resolvingFailure}
+              />
+            </Field>
+            <FormActions>
+              <button
+                className="btn"
+                disabled={resolvingFailure || !failureInstructions.trim()}
+                onClick={() => void resolveFailure('retry')}
+              >
+                Retry with guidance
+              </button>
+              <button className="btn-ghost" disabled={resolvingFailure} onClick={() => void resolveFailure('backlog')}>
+                Park in Backlog
+              </button>
+              <button className="btn-ghost" disabled={resolvingFailure} onClick={() => void resolveFailure('done')}>
+                Accept as done
+              </button>
+            </FormActions>
+          </section>
+        ) : null}
+
+        {task.humanInstructions && task.status !== 'failed' ? (
+          <div className="rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-800">
+            <h3 className="mb-1 text-xs font-semibold tracking-wide uppercase">Maintainer guidance</h3>
+            <p className="whitespace-pre-wrap">{task.humanInstructions}</p>
+          </div>
+        ) : null}
 
         {editing ? (
           <div className="flex flex-col gap-3">

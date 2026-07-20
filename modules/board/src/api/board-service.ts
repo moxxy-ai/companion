@@ -161,8 +161,9 @@ export class BoardService {
 
   /**
    * Human moves between columns. Machine columns are protected: you can queue
-   * (→ ready), park (→ backlog, cancelling any active run), force-complete a
-   * PR you merged yourself (in_review → done) or retry a failure (→ ready).
+   * (→ ready), park (→ backlog, cancelling any active run), or force-complete
+   * a PR you merged yourself (in_review → done). Failed cards are protected and
+   * must go through resolveFailure so the decision is validated and audited.
    * Queueing normalizes the stage: a task with no PR builds fresh; a task with
    * a PR re-enters the review cycle unless it carries bound remediation work.
    */
@@ -171,9 +172,10 @@ export class BoardService {
     if (!task) throw new Error('task not found');
     const from = task.status;
     if (to === from) return task;
+    if (from === 'failed') throw new Error('failed tasks must be resolved through maintainer review');
 
     if (to === 'ready') {
-      if (!['backlog', 'failed', 'in_review'].includes(from)) {
+      if (!['backlog', 'in_review'].includes(from)) {
         throw new Error(`cannot queue a task from "${from}"`);
       }
       // Normalize the queue target: no PR → fresh build; bound remediation
@@ -191,14 +193,10 @@ export class BoardService {
             : changesRequested
               ? { status: 'ready', stage: 'address_review' }
               : { status: 'in_review', stage: 'awaiting_review' };
-      if (from === 'failed') {
-        patch.attempts = 0;
-        patch.lastError = null;
-      }
       this.store.updateTask(id, patch);
       this.store.insertEvent(id, 'queued', `moved from ${from}`);
     } else if (to === 'backlog') {
-      if (!['ready', 'failed', 'in_review', 'in_progress'].includes(from)) {
+      if (!['ready', 'in_review', 'in_progress'].includes(from)) {
         throw new Error(`cannot park a task from "${from}"`);
       }
       // Detach BEFORE discarding: markRun('abandoned') re-emits run.changed
@@ -263,6 +261,7 @@ export class BoardService {
       this.store.updateTask(id, {
         status: 'done',
         stage: null,
+        assignedWorkerId: null,
         runId: null,
         lastError: null,
         humanInstructions: guidance || null,
@@ -489,7 +488,7 @@ export class BoardService {
     try {
       let run: RunRecord;
       if (stage === 'address_review') {
-        run = await this.code.fixes.startReviewFix(task.repo, task.prNumber!);
+        run = await this.code.fixes.startReviewFix(task.repo, task.prNumber!, task.humanInstructions ?? undefined);
       } else if (stage === 'fix_ci') {
         run = await this.code.fixes.startCheckFix(task.repo, task.prNumber!);
       } else {

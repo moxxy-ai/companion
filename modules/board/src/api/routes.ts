@@ -113,6 +113,21 @@ export default defineRoutes((ctx) => {
     }),
 
     route({
+      method: 'POST',
+      path: '/api/board/tasks/:id/resolve-failure',
+      access: 'board:manage',
+      body: resolveFailureSchema,
+      handler: async ({ params, body, user }) => {
+        if (!board.getTask(user!, params.id)) throw notFound('task not found');
+        try {
+          return { task: await board.resolveFailure(params.id, body.decision, body.instructions) };
+        } catch (err) {
+          throw badRequest(String(err instanceof Error ? err.message : err));
+        }
+      },
+    }),
+
+    route({
       method: 'DELETE',
       path: '/api/board/tasks/:id',
       access: 'board:manage',
