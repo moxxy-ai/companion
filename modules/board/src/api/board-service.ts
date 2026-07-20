@@ -58,8 +58,6 @@ export class BoardService {
   /** Failed attempts cool down before redispatch — a fast-dying runner
    *  environment must not burn the whole attempt ceiling in seconds. */
   private readonly retryBackoff = new Map<string, number>();
-  /** Heartbeat-discovered blockers must alert once, not every reconcile pass. */
-  private readonly notifiedBlockers = new Set<string>();
   private disposed = false;
 
   constructor(
@@ -236,12 +234,16 @@ export class BoardService {
         patch.lastError = null;
       }
       this.retryBackoff.delete(id);
+      // A newly queued cycle may encounter the same infrastructure blocker and
+      // must be allowed to alert again.
+      this.clearBlockers(id);
       this.store.updateTask(id, patch);
       this.store.insertEvent(id, 'queued', `moved from ${from}`);
     } else if (to === 'backlog') {
       if (!['ready', 'failed', 'in_review', 'in_progress'].includes(from)) {
         throw new Error(`cannot park a task from "${from}"`);
       }
+      this.clearBlockers(id);
       // Detach BEFORE discarding: markRun('abandoned') re-emits run.changed
       // synchronously, and onRunChanged must find nothing to react to. A
       // parked remediation keeps its work stage so re-queueing resumes it.
@@ -257,6 +259,7 @@ export class BoardService {
       }
     } else if (to === 'done') {
       if (from !== 'in_review') throw new Error('only a task in review can be completed by hand');
+      this.clearBlockers(id);
       this.store.updateTask(id, { status: 'done', stage: null, runId: null, finishedAt: Date.now(), lastError: null });
       this.store.insertEvent(id, 'done', 'completed by hand');
     } else {
@@ -271,6 +274,8 @@ export class BoardService {
   async deleteTask(id: string): Promise<void> {
     const task = this.store.getTask(id);
     if (!task) return;
+    // Clear before deleting because task deletion also removes its event log.
+    this.clearBlockers(id);
     // Delete first: discard() re-emits run.changed synchronously and nothing
     // may react to it; the row being gone makes every late event a no-op.
     this.store.deleteTask(id);
@@ -468,6 +473,10 @@ export class BoardService {
             'Board task is waiting for a developer',
             `No enabled developer is available for ${task.title}. Add or enable a developer worker to start it.`,
           );
+        } else {
+          // The infrastructure blocker is resolved even when all developers are
+          // merely busy; a later genuine absence is a new actionable lifecycle.
+          this.clearBlocker(task.id, 'developer');
         }
         continue;
       }
@@ -683,6 +692,9 @@ ${acceptance}${specSection}
       }
       if (task.stage === 'reviewing') continue; // verdict in flight
 
+      if (task.stage !== 'awaiting_review' || !config.autoReview) {
+        this.clearBlocker(task.id, 'reviewer');
+      }
       if (task.stage === 'awaiting_review' && config.autoReview) {
         const reviewer = config.reviewerWorkerId ? this.store.getWorker(config.reviewerWorkerId) : undefined;
         // Review paused until a reviewer worker is configured and enabled.
@@ -983,22 +995,25 @@ ${acceptance}${specSection}
     this.broadcast({ t: 'board.changed' });
   }
 
-  /** Periodic blockers remain actionable but produce only one inbox entry. */
+  /**
+   * Periodic blockers remain actionable but produce only one inbox entry per
+   * active lifecycle. Events provide the durable latch across daemon restarts.
+   */
   private notifyBlocker(task: TaskRecord, blocker: string, title: string, body: string): void {
-    const key = `${task.id}:${blocker}`;
-    if (this.notifiedBlockers.has(key)) return;
-    this.notifiedBlockers.add(key);
+    if (this.store.hasActiveBlocker(task.id, blocker)) return;
+    this.store.insertEvent(task.id, 'blocker_notified', blocker);
     this.notifyUser(task.repo, 'action_required', title, body, `#/board?task=${task.id}`);
   }
 
   private clearBlocker(taskId: string, blocker: string): void {
-    this.notifiedBlockers.delete(`${taskId}:${blocker}`);
+    if (this.store.hasActiveBlocker(taskId, blocker)) {
+      this.store.insertEvent(taskId, 'blocker_cleared', blocker);
+    }
   }
 
   private clearBlockers(taskId: string): void {
-    for (const key of this.notifiedBlockers) {
-      if (key.startsWith(`${taskId}:`)) this.notifiedBlockers.delete(key);
-    }
+    this.clearBlocker(taskId, 'developer');
+    this.clearBlocker(taskId, 'reviewer');
   }
 
   private notifyUser(repo: string, kind: 'finished' | 'error' | 'info' | 'action_required', title: string, body: string, href: string): void {

@@ -287,6 +287,21 @@ export class BoardStore {
     return rows.map(rowToEvent);
   }
 
+  /**
+   * Whether a heartbeat blocker is still active. The latest matching event is
+   * the durable latch, so daemon restarts cannot repeat an inbox notification.
+   */
+  hasActiveBlocker(taskId: string, blocker: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT kind FROM board_events
+         WHERE task_id = ? AND detail = ? AND kind IN ('blocker_notified', 'blocker_cleared')
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .get(taskId, blocker) as { kind: string } | undefined;
+    return row?.kind === 'blocker_notified';
+  }
+
   // ---------- config ------------------------------------------------------------------
 
   getConfig(workspaceId: string): BoardConfig {
