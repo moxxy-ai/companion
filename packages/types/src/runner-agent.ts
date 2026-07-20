@@ -18,7 +18,7 @@
  * them on the run row and hands them back to the agent verbatim.
  */
 
-import type { AskRequest, AskResponse, HistorySegment, MoxxyEvent } from './moxxy.js';
+import type { AskRequest, AskResponse, HistorySegment, MoxxyEvent, PromptAttachment } from './moxxy.js';
 
 /** GET /agent/health */
 export interface AgentHealth {
@@ -51,6 +51,7 @@ export interface AgentSpawnRequest {
 export interface AgentPromptRequest {
   readonly prompt: string;
   readonly model?: string;
+  readonly attachments?: readonly PromptAttachment[];
 }
 
 /**

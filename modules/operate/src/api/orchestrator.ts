@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AskRequest, HistorySegment, MoxxyEvent } from '@companion/types';
+import type { AskRequest, HistorySegment, MoxxyEvent, PromptAttachment } from '@companion/types';
 import type { ModuleConfigAccessor } from '@companion/core';
 import type { SpaServerMessage } from '@companion/contracts';
 import type { NotificationKind } from '@companion/module-workspace/contract';
@@ -405,7 +405,7 @@ export class Orchestrator implements RunnerEventSink {
 
   // ---------- interaction -----------------------------------------------------------
 
-  async sendPrompt(runId: string, prompt: string, model?: string): Promise<{ turnId: string }> {
+  async sendPrompt(runId: string, prompt: string, model?: string, attachments?: readonly PromptAttachment[]): Promise<{ turnId: string }> {
     const backend = this.requireLive(runId);
     // A new turn on an idle attended chat: it's working again.
     if (this.store.runs.get(runId)?.status === 'idle') {
@@ -426,11 +426,11 @@ export class Orchestrator implements RunnerEventSink {
         runId,
         model: chosen,
       });
-      const result = await backend.runTurn(runId, { prompt });
+      const result = await backend.runTurn(runId, { prompt, attachments });
       this.broadcast({ t: 'turn', runId, phase: 'started', turnId: result.turnId });
       return result;
     }
-    const result = await backend.runTurn(runId, { prompt, model: chosen });
+    const result = await backend.runTurn(runId, { prompt, model: chosen, attachments });
     // The gateway never broadcasts turn.started — synthesize it.
     this.broadcast({ t: 'turn', runId, phase: 'started', turnId: result.turnId });
     return result;

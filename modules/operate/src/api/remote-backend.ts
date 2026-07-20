@@ -10,6 +10,7 @@ import type {
   AgentCloneStatusResponse,
   AskResponse,
   HistorySegment,
+  RunTurnArgs,
   RunTurnResult,
 } from '@companion/types';
 import { RUNNER_AGENT_PROTOCOL } from '@companion/types';
@@ -127,7 +128,7 @@ export class RemoteRunnerBackend implements RunnerBackend {
 
   // ---------- interaction ----------
 
-  async runTurn(runId: string, args: { prompt: string; model?: string }): Promise<RunTurnResult> {
+  async runTurn(runId: string, args: RunTurnArgs): Promise<RunTurnResult> {
     return this.call<RunTurnResult>('POST', `/runs/${runId}/prompt`, args);
   }
   async abortTurn(runId: string, turnId?: string): Promise<void> {

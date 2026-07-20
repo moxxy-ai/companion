@@ -56,6 +56,21 @@ export interface WorkerView extends WorkerRecord {
   readonly busyTaskTitle: string | null;
 }
 
+/** An image attached to a task and sent with the worker's first prompt. */
+export interface TaskAttachment {
+  readonly id: string;
+  readonly name: string;
+  readonly mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
+  /** Base64 image bytes; null in board snapshots and present in task detail. */
+  readonly content: string | null;
+}
+
+export interface TaskAttachmentInput {
+  readonly name: string;
+  readonly mediaType: TaskAttachment['mediaType'];
+  readonly content: string;
+}
+
 export interface TaskRecord {
   readonly id: string;
   readonly repo: string;
@@ -63,6 +78,7 @@ export interface TaskRecord {
   readonly description: string;
   /** Optional plan-module spec attached as agent context. */
   readonly specId: string | null;
+  readonly attachments: readonly TaskAttachment[];
   readonly priority: TaskPriority;
   readonly status: TaskStatus;
   readonly stage: TaskStage | null;

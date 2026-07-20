@@ -9,6 +9,7 @@ import {
   type RpcNotificationFrame,
   type RpcRequestFrame,
   type RpcResponseFrame,
+  type RunTurnArgs,
   type RunTurnResult,
 } from '@companion/types';
 
@@ -98,7 +99,7 @@ export class GatewayClient {
 
   // ---------- typed command surface -----------------------------------------
 
-  async runTurn(args: { prompt: string; model?: string }): Promise<RunTurnResult> {
+  async runTurn(args: RunTurnArgs): Promise<RunTurnResult> {
     return (await this.request('session.runTurn', args)) as RunTurnResult;
   }
 

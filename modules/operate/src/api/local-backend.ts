@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { AskResponse, HistorySegment, RunTurnResult } from '@companion/types';
+import type { AskResponse, HistorySegment, RunTurnArgs, RunTurnResult } from '@companion/types';
 import { paths } from '@companion/services';
 import type { RunnerHealth } from '../contract/index.js';
 import { GatewayPool } from '../exec/gateway-pool.js';
@@ -86,7 +86,7 @@ export class LocalRunnerBackend implements RunnerBackend {
     return handle.client;
   }
 
-  runTurn(runId: string, args: { prompt: string; model?: string }): Promise<RunTurnResult> {
+  runTurn(runId: string, args: RunTurnArgs): Promise<RunTurnResult> {
     return this.live(runId).runTurn(args);
   }
   abortTurn(runId: string, turnId?: string): Promise<void> {

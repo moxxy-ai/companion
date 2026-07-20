@@ -254,9 +254,9 @@ async function routeRun(
     }
     case 'prompt': {
       requireMethod(method, 'POST', action);
-      const { prompt, model } = body as AgentPromptRequest;
+      const { prompt, model, attachments } = body as AgentPromptRequest;
       requireString(prompt, 'prompt');
-      return liveClient(deps.pool, runId).runTurn(model === undefined ? { prompt } : { prompt, model });
+      return liveClient(deps.pool, runId).runTurn({ prompt, ...(model === undefined ? {} : { model }), attachments });
     }
     case 'command': {
       requireMethod(method, 'POST', action);

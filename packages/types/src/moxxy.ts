@@ -211,9 +211,18 @@ export interface AskResponse {
 
 // ---------- Gateway commands Companion invokes -------------------------------
 
+export interface PromptAttachment {
+  readonly kind: 'image';
+  /** Base64 bytes, without a data-URL prefix. */
+  readonly content: string;
+  readonly name?: string;
+  readonly mediaType: string;
+}
+
 export interface RunTurnArgs {
   readonly prompt: string;
   readonly model?: string;
+  readonly attachments?: readonly PromptAttachment[];
 }
 
 export interface RunTurnResult {

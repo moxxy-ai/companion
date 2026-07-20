@@ -1,6 +1,17 @@
 import { z } from 'zod';
 import { badRequest, created, defineRoutes, forbidden, notFound, route } from '@companion/core/server';
 
+const attachmentSchema = z.object({
+  name: z.string().min(1).max(200),
+  mediaType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
+  content: z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/).max(1_200_000),
+});
+const attachmentsSchema = z
+  .array(attachmentSchema)
+  .max(5)
+  .refine((attachments) => attachments.reduce((total, attachment) => total + attachment.content.length, 0) <= 1_500_000, 'images are too large in total')
+  .default([]);
+
 const prioritySchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
 
 const createTaskSchema = z.object({
@@ -8,6 +19,7 @@ const createTaskSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(20_000).default(''),
   specId: z.string().max(100).nullable().default(null),
+  attachments: attachmentsSchema,
   priority: prioritySchema.default(2),
   queue: z.boolean().default(false),
 });
@@ -16,6 +28,7 @@ const updateTaskSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   description: z.string().max(20_000).optional(),
   specId: z.string().max(100).nullable().optional(),
+  attachments: attachmentsSchema.optional(),
   priority: prioritySchema.optional(),
 });
 

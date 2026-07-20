@@ -1,4 +1,5 @@
 import type { SpaServerMessage } from '@companion/contracts';
+import type { PromptAttachment } from '@companion/types';
 import type { RunRecord } from '@companion/module-operate/contract';
 import type { PrRecord } from '../contract/index.js';
 import type { CodeStore } from './code-store.js';
@@ -66,6 +67,7 @@ export class Fixes {
     branchPrefix: string;
     baseBranch: string;
     objective: string;
+    attachments?: readonly PromptAttachment[];
   }): Promise<RunRecord> {
     const suffix = Date.now().toString(36).slice(-4);
     const branch = `${opts.branchPrefix}-${suffix}`;
@@ -91,7 +93,7 @@ export class Fixes {
     });
 
     await this.orchestrator.setGoalMode(run.id);
-    await this.orchestrator.sendPrompt(run.id, opts.objective);
+    await this.orchestrator.sendPrompt(run.id, opts.objective, undefined, opts.attachments);
     return this.orchestrator.getRun(run.id)!;
   }
 

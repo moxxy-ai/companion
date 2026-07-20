@@ -1,4 +1,4 @@
-import type { AskRequest, AskResponse, HistorySegment, MoxxyEvent, RunTurnResult } from '@companion/types';
+import type { AskRequest, AskResponse, HistorySegment, MoxxyEvent, RunTurnArgs, RunTurnResult } from '@companion/types';
 import type { RunnerHealth } from '../contract/index.js';
 
 /**
@@ -26,7 +26,7 @@ export interface RunnerBackend {
   liveIds(): string[];
 
   // ---------- interaction (proxied to the gateway) ----------
-  runTurn(runId: string, args: { prompt: string; model?: string }): Promise<RunTurnResult>;
+  runTurn(runId: string, args: RunTurnArgs): Promise<RunTurnResult>;
   abortTurn(runId: string, turnId?: string): Promise<void>;
   sessionInfo(runId: string): Promise<unknown>;
   setMode(runId: string, mode: string): Promise<void>;

@@ -66,4 +66,17 @@ export default defineMigrations([
       `);
     },
   },
+  {
+    version: 2,
+    name: 'board_task_attachments',
+    up: (db) => {
+      const columns = db.prepare(`PRAGMA table_info(board_tasks)`).all() as Array<{ name: string }>;
+      if (!columns.some((column) => column.name === 'attachments')) {
+        db.exec(`ALTER TABLE board_tasks ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'`);
+      }
+    },
+    // SQLite cannot safely remove a column while preserving installations that
+    // may already contain task data. Module teardown drops the table in v1.
+    down: () => undefined,
+  },
 ]);

@@ -2,6 +2,7 @@ import { del, patch, post, put, request } from '@companion/core/client';
 import type {
   BoardConfig,
   SpecOption,
+  TaskAttachmentInput,
   TaskEventRecord,
   TaskPriority,
   TaskRecord,
@@ -25,12 +26,13 @@ export const boardApi = {
     title: string;
     description: string;
     specId: string | null;
+    attachments: readonly TaskAttachmentInput[];
     priority: TaskPriority;
     queue: boolean;
   }) => post<{ task: TaskRecord }>('/api/board/tasks', input),
   updateTask: (
     id: string,
-    fields: { title?: string; description?: string; specId?: string | null; priority?: TaskPriority },
+    fields: { title?: string; description?: string; specId?: string | null; attachments?: readonly TaskAttachmentInput[]; priority?: TaskPriority },
   ) => patch<{ task: TaskRecord }>(`/api/board/tasks/${id}`, fields),
   moveTask: (id: string, to: TaskStatus) => post<{ task: TaskRecord }>(`/api/board/tasks/${id}/move`, { to }),
   deleteTask: (id: string) => del<{ ok: true }>(`/api/board/tasks/${id}`),
