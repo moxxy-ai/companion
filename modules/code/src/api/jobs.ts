@@ -38,7 +38,9 @@ export default defineJobs({
     const num = (a: Record<string, unknown>, k: string): number => Number(a[k]);
     const str = (a: Record<string, unknown>, k: string): string => String(a[k]);
     operate.orchestrator.registerResumer('triage', (a) => code.triage.triageIssue(str(a, 'repo'), num(a, 'number')));
-    operate.orchestrator.registerResumer('pr-review', (a) => code.prReviews.analyzePr(str(a, 'repo'), num(a, 'number')));
+    operate.orchestrator.registerResumer('pr-review', (a) =>
+      code.prReviews.analyzePr(str(a, 'repo'), num(a, 'number'), typeof a.context === 'string' ? { context: a.context } : undefined),
+    );
     operate.orchestrator.registerResumer('ci-analysis', (a) =>
       code.prReviews.analyzeFailedChecks(str(a, 'repo'), num(a, 'number')),
     );

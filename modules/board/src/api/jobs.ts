@@ -20,9 +20,13 @@ export default defineJobs({
     ctx.services.tryGet('board')?.dispose();
   },
   postActivate: (ctx) => {
+    const board = ctx.services.get('board');
+    // Rows created before workspace scoping adopt into the first workspace.
+    const first = ctx.services.get('workspace').list()[0];
+    if (first) board.adoptUnscoped(first.id);
     // Boot recovery: reconcile tasks against run rows (operate's recover()
     // has already marked orphaned runs interrupted) and restart dispatch.
-    ctx.services.get('board').kick();
+    board.kick();
   },
   jobs: [
     {

@@ -114,6 +114,10 @@ export const codeApi = {
     post<{ run: RunRecord }>(`/api/repos/${fullName}/prs/${number}/fix-checks`),
   addressReviews: (fullName: string, number: number) =>
     post<{ run: RunRecord }>(`/api/repos/${fullName}/prs/${number}/address-reviews`),
+  resolveConflicts: (fullName: string, number: number) =>
+    post<{ run: RunRecord }>(`/api/repos/${fullName}/prs/${number}/resolve-conflicts`),
+  runPrAgent: (fullName: string, number: number, instructions: string) =>
+    post<{ run: RunRecord }>(`/api/repos/${fullName}/prs/${number}/agent`, { instructions }),
   prComments: (fullName: string, number: number) =>
     request<{ comments: CommentRecord[] }>(`/api/repos/${fullName}/prs/${number}/comments`),
   commentPr: (fullName: string, number: number, body: string) =>

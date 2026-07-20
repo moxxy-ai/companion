@@ -288,6 +288,8 @@ export interface GhPull {
   assignees?: Array<{ login: string }> | null;
   head: { ref: string; sha: string };
   base: { ref: string };
+  /** Only on the single-PR GET and webhook payloads (never the list); null = still computing. */
+  mergeable?: boolean | null;
   user: { login: string } | null;
   html_url: string;
   created_at: string;

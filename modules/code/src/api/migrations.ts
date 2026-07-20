@@ -176,4 +176,14 @@ export default defineMigrations([
       );
     },
   },
+  {
+    version: 2,
+    name: 'code_pr_mergeable',
+    up: (db) => {
+      db.exec(`ALTER TABLE prs ADD COLUMN mergeable INTEGER`);
+    },
+    down: (db) => {
+      db.exec(`ALTER TABLE prs DROP COLUMN mergeable`);
+    },
+  },
 ]);

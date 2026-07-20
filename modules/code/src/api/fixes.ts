@@ -139,6 +139,45 @@ export class Fixes {
     );
   }
 
+  /** Agent merges the fresh base into the PR branch and resolves the conflicts. */
+  async startConflictResolve(repo: string, prNumber: number): Promise<RunRecord> {
+    const { pr, client } = this.requireOpenPr(repo, prNumber);
+    // Re-check GitHub live — the sync cache can lag a manual resolution, and a
+    // run launched then would push a pointless no-op merge commit. Fail open on
+    // fetch trouble: the run itself discovers "already up to date".
+    const live = await client.pull(repo, prNumber).catch(() => null);
+    if (live && live.mergeable !== undefined) {
+      this.store.prs.setMergeable(repo, prNumber, live.mergeable);
+      this.broadcast({ t: 'prs.changed', repo });
+      if (live.mergeable === true) throw new Error('GitHub reports no merge conflicts on this PR');
+    }
+    const diff = await this.contextDiff(client, repo, prNumber);
+    return this.createPrBranchRun(
+      pr,
+      `Resolve conflicts on PR #${prNumber}: ${pr.title.slice(0, 45)}`,
+      conflictObjective(pr, diff),
+      // Merging against a stale base would "resolve" nothing — refresh origin.
+      { freshOrigin: true },
+    );
+  }
+
+  /** Agent works on the PR branch with a user-written objective. */
+  async startCustomPrRun(repo: string, prNumber: number, instructions: string): Promise<RunRecord> {
+    const { pr, client } = this.requireOpenPr(repo, prNumber);
+    const diff = await this.contextDiff(client, repo, prNumber);
+    const preview = instructions.trim().split('\n')[0]!.slice(0, 50);
+    return this.createPrBranchRun(pr, `Agent on PR #${prNumber}: ${preview}`, customObjective(pr, instructions, diff));
+  }
+
+  /**
+   * The PR diff as prompt context only — GitHub 406s the single-payload diff on
+   * large PRs, and losing the context must not block the run itself.
+   */
+  private async contextDiff(client: GitHubClient, repo: string, prNumber: number): Promise<string> {
+    const diff = await client.prDiff(repo, prNumber).catch(() => '(diff too large to include — read it from git)');
+    return clip(diff);
+  }
+
   private requireOpenPr(repo: string, prNumber: number): { pr: PrRecord; client: GitHubClient } {
     const pr = this.store.prs.get(repo, prNumber);
     if (!pr) throw new Error(`unknown PR ${repo}#${prNumber}`);
@@ -150,15 +189,23 @@ export class Fixes {
   }
 
   /** Worktree AT the PR head; the run carries the PR so approve pushes to it. */
-  private async createPrBranchRun(pr: PrRecord, title: string, objective: string): Promise<RunRecord> {
+  private async createPrBranchRun(
+    pr: PrRecord,
+    title: string,
+    objective: string,
+    opts: { freshOrigin?: boolean } = {},
+  ): Promise<RunRecord> {
     const suffix = `${Date.now().toString(36).slice(-4)}-${Math.random().toString(36).slice(2, 8)}`;
     const runnerId = this.orchestrator.placeRun(pr.repo, 'fix');
     const backend = this.backendForRun(runnerId);
+    await backend.ensureClone(pr.repo);
+    if (opts.freshOrigin) await backend.fetchOrigin(pr.repo);
     let cwd: string;
     try {
-      await backend.ensureClone(pr.repo);
       cwd = await backend.addWorktreeAtBranch(pr.repo, `prfix-${suffix}`, pr.headRef);
     } catch (err) {
+      // Only the checkout step earns the fork-branch diagnosis — clone/fetch
+      // failures surface raw so a network blip isn't mislabelled.
       throw new Error(
         `could not check out ${pr.headRef} from origin — fork-branch PRs are not supported yet (${err instanceof Error ? err.message.split('\n')[0] : String(err)})`,
       );
@@ -295,6 +342,40 @@ ${diff}
 - Verify your changes (run relevant tests/builds where possible).
 - Commit with clear messages (git add + git commit). Do NOT push — the maintainer reviews the delta and pushes after approval.
 - Finish with a summary mapping each review comment to what you did about it.`;
+}
+
+function conflictObjective(pr: PrRecord, diff: string): string {
+  return `You are an autonomous software engineer working in a git worktree checked out AT the head of pull request #${pr.number} ("${pr.title}", branch ${pr.headRef}). The PR has merge conflicts against its target branch ${pr.baseRef}; your job is to resolve them so the PR merges cleanly, without changing what it intends to do.
+
+## The PR's diff (for context — this work is already on your branch)
+\`\`\`diff
+${diff}
+\`\`\`
+
+## Rules
+- Work ONLY inside this worktree, on this branch. All origin refs were fetched just now — do NOT fetch or pull.
+- Run \`git merge origin/${pr.baseRef}\` and resolve every conflict by hand, preserving the intent of BOTH sides: keep what ${pr.baseRef} changed AND what this PR changes. Never resolve by wholesale taking one side.
+- After resolving, verify the result compiles/passes (run the build or test suite where practical), then complete the merge commit (git add + git commit). Do NOT push — the maintainer reviews the delta and pushes after approval.
+- Finish with a short summary: which files conflicted, how you resolved each, and how you verified the result.`;
+}
+
+function customObjective(pr: PrRecord, instructions: string, diff: string): string {
+  return `You are an autonomous software engineer working in a git worktree checked out AT the head of pull request #${pr.number} ("${pr.title}", branch ${pr.headRef}, targeting ${pr.baseRef}). The maintainer asked you to do the following on this PR's branch.
+
+## Task
+${instructions.trim()}
+
+## The PR's diff (for context — this work is already on your branch)
+\`\`\`diff
+${diff}
+\`\`\`
+
+## Rules
+- Work ONLY inside this worktree, on this branch.
+- Respect the PR's intent unless the task explicitly says otherwise.
+- Verify your changes (run relevant tests/builds where possible).
+- Commit your work with clear messages (git add + git commit). Do NOT push — the maintainer reviews the delta and pushes after approval.
+- Finish with a short summary of what you did and how you verified it.`;
 }
 
 function fixObjective(title: string, body: string, issueNumber: number, baseBranch: string): string {

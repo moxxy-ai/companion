@@ -12,6 +12,7 @@ import {
   type AgentDiffRequest,
   type AgentDiffResponse,
   type AgentEnsureCloneRequest,
+  type AgentFetchRequest,
   type AgentEventMessage,
   type AgentHealth,
   type AgentPromptRequest,
@@ -331,6 +332,12 @@ async function routeGit(checkouts: Checkouts, action: string, body: unknown): Pr
       const { repo, githubToken } = body as AgentEnsureCloneRequest;
       requireString(repo, 'repo');
       await checkouts.clone(repo, githubToken);
+      return { ok: true };
+    }
+    case 'fetch': {
+      const { repo, githubToken } = body as AgentFetchRequest;
+      requireString(repo, 'repo');
+      await checkouts.fetch(repo, githubToken);
       return { ok: true };
     }
     case 'worktree': {

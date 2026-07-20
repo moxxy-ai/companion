@@ -15,7 +15,7 @@ export class PrsStore {
     private readonly githubAccounts: GithubAccountsStore,
   ) {}
 
-  upsert(pr: Omit<PrRecord, 'review' | 'reviewRisk' | 'checks' | 'reviewDecision'>): void {
+  upsert(pr: Omit<PrRecord, 'review' | 'reviewRisk' | 'checks' | 'reviewDecision' | 'mergeable'>): void {
     this.db
       .prepare(
         `INSERT INTO prs (repo, number, title, body, state, head_ref, head_sha, base_ref, draft, author, labels, assignees, url, created_at, updated_at, closed_at)
@@ -27,6 +27,7 @@ export class PrsStore {
            url = excluded.url, updated_at = excluded.updated_at,
            closed_at = excluded.closed_at,
            checks = CASE WHEN excluded.head_sha IS NOT prs.head_sha THEN NULL ELSE prs.checks END,
+           mergeable = CASE WHEN excluded.head_sha IS NOT prs.head_sha THEN NULL ELSE prs.mergeable END,
            head_sha = excluded.head_sha`,
       )
       .run({
@@ -45,6 +46,13 @@ export class PrsStore {
   /** Conversation comment count, harvested from the issues feed during sync. */
   setComments(repo: string, number: number, comments: number): void {
     this.db.prepare(`UPDATE prs SET comments = ? WHERE repo = ? AND number = ?`).run(comments, repo, number);
+  }
+
+  /** GitHub's merge-cleanliness verdict; null = unknown (still computing). */
+  setMergeable(repo: string, number: number, mergeable: boolean | null): void {
+    this.db
+      .prepare(`UPDATE prs SET mergeable = ? WHERE repo = ? AND number = ?`)
+      .run(mergeable === null ? null : mergeable ? 1 : 0, repo, number);
   }
 
   /** Cache the latest CI snapshot for a PR (invalidated when head_sha moves). */
@@ -203,6 +211,7 @@ interface PrRow {
   assignees: string;
   comments: number;
   review_decision: string | null;
+  mergeable: number | null;
   url: string;
   checks: string | null;
   created_at: number;
@@ -233,6 +242,7 @@ function prRowToRecord(row: PrRow, review: LatestReviewSignal | null): PrRecord 
     reviewRisk: review?.risk ?? null,
     reviewDecision:
       row.review_decision === 'approved' || row.review_decision === 'changes_requested' ? row.review_decision : null,
+    mergeable: row.mergeable === null ? null : row.mergeable === 1,
     checks: row.checks ? safeParse<ChecksSnapshot | null>(row.checks, null) : null,
   };
 }

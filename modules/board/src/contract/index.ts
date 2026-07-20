@@ -2,6 +2,7 @@
 // (permissions, services, messages) are visible in this compilation.
 import '@companion/module-workspace/contract';
 import '@companion/module-code/contract';
+import type { ChecksSnapshot } from '@companion/module-code/contract';
 import '@companion/module-operate/contract';
 import '@companion/module-plan/contract';
 import type { BoardService } from '../api/board-service.js';
@@ -42,6 +43,8 @@ export type WorkerRole = 'developer' | 'reviewer';
 
 export interface WorkerRecord {
   readonly id: string;
+  /** The workspace this worker serves — boards are workspace-scoped. */
+  readonly workspaceId: string;
   readonly name: string;
   readonly role: WorkerRole;
   readonly enabled: boolean;
@@ -76,12 +79,18 @@ export interface TaskRecord {
   readonly repo: string;
   readonly title: string;
   readonly description: string;
+  /** Definition of done: acceptance criteria the build must satisfy. */
+  readonly acceptance: string;
   /** Optional plan-module spec attached as agent context. */
   readonly specId: string | null;
   readonly attachments: readonly TaskAttachment[];
   readonly priority: TaskPriority;
   readonly status: TaskStatus;
   readonly stage: TaskStage | null;
+  /** Username of the human who created the task. */
+  readonly createdBy: string | null;
+  /** Name snapshot of the first worker to pick this up (survives worker deletion). */
+  readonly firstWorker: string | null;
   /** Sticky assignment: kept across the review cycle so feedback binds back. */
   readonly assignedWorkerId: string | null;
   /** The currently-active agent run, if any. */
@@ -101,6 +110,13 @@ export interface TaskRecord {
   readonly finishedAt: number | null;
 }
 
+/** The task's PR as GitHub sees it (from the code module's sync cache). */
+export interface TaskPrView {
+  readonly state: 'open' | 'closed' | 'merged';
+  readonly reviewDecision: 'approved' | 'changes_requested' | null;
+  readonly checks: ChecksSnapshot | null;
+}
+
 /** Timeline entry on a task — who did what, when. */
 export interface TaskEventRecord {
   readonly id: number;
@@ -117,6 +133,12 @@ export interface BoardConfig {
   /** Merge automatically once review approves and checks are green. */
   readonly autoMerge: boolean;
   readonly mergeMethod: 'merge' | 'squash' | 'rebase';
+  /**
+   * Connected GitHub account that performs merges (one with merge rights on
+   * the board's repos). Must be a shared/delegated account — personal accounts
+   * never act unattended. Null = automatic resolution.
+   */
+  readonly mergeAccountId: string | null;
   /** Failing checks on a task's PR send it back to its worker. */
   readonly autoFixCi: boolean;
   /** Remediation ceiling before the task drops into the Failed column. */

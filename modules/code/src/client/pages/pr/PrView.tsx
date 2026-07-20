@@ -7,7 +7,10 @@ import {
   CopyText,
   EmptyState,
   ErrorBar,
+  Field,
+  FormActions,
   Markdown,
+  Modal,
   Page,
   PageLoading,
   Spinner,
@@ -133,6 +136,7 @@ function ReviewLead({ pr, canAct, onRun }: { pr: UsePr; canAct: boolean; onRun: 
 function PrHeader({ pr, data, mode }: { pr: PrRecord; data: UsePr; mode: Mode }): JSX.Element {
   const { confirmDanger, confirmElement } = useConfirm();
   const [runningPipeline, setRunningPipeline] = useState(false);
+  const [runningAgent, setRunningAgent] = useState(false);
   const review = mode === 'review';
 
   const aiActions: MenuAction[] = [];
@@ -152,9 +156,54 @@ function PrHeader({ pr, data, mode }: { pr: PrRecord; data: UsePr; mode: Mode })
         onSelect: () => void data.addressReviews(),
       });
     }
+    if (pr.state === 'open' && pr.mergeable === false) {
+      aiActions.push({
+        label: 'Resolve conflicts',
+        disabled: data.agentBusy !== null,
+        onSelect: () => void data.resolveConflicts(),
+      });
+    }
+    if (pr.state === 'open') {
+      aiActions.push({ label: 'Run agent on branch…', disabled: data.agentBusy !== null, onSelect: () => setRunningAgent(true) });
+    }
   }
   if (!review && data.canAct && pr.state === 'open' && data.pipelines.length > 0) {
     aiActions.push({ label: 'Run pipeline…', onSelect: () => setRunningPipeline(true) });
+  }
+
+  // A conflicted PR cannot merge — the menu offers Close only; the AI menu's
+  // "Resolve conflicts" is the way forward.
+  const prActions: MenuAction[] = [];
+  if (data.canAct && pr.state === 'open') {
+    if (pr.mergeable !== false) {
+      prActions.push({
+        label: 'Squash-merge…',
+        disabled: data.busy,
+        onSelect: () =>
+          void (async () => {
+            const ok = await confirmDanger({
+              title: `Merge PR #${pr.number}`,
+              message: `"${pr.title}" is squash-merged into ${pr.baseRef}. Merging cannot be undone from Companion.`,
+              confirmLabel: 'Squash-merge',
+            });
+            if (ok) await data.merge('squash');
+          })(),
+      });
+    }
+    prActions.push({
+      label: 'Close PR…',
+      danger: true,
+      disabled: data.busy,
+      onSelect: () =>
+        void (async () => {
+          const ok = await confirmDanger({
+            title: `Close PR #${pr.number}`,
+            message: 'The pull request is closed on GitHub without merging.',
+            confirmLabel: 'Close PR',
+          });
+          if (ok) await data.close();
+        })(),
+    });
   }
 
   return (
@@ -181,40 +230,7 @@ function PrHeader({ pr, data, mode }: { pr: PrRecord; data: UsePr; mode: Mode })
               Full PR
             </a>
           ) : null}
-          {data.canAct && pr.state === 'open' ? (
-            <ActionMenu
-              label="More pull request actions"
-              actions={[
-                {
-                  label: 'Squash-merge…',
-                  disabled: data.busy,
-                  onSelect: () =>
-                    void (async () => {
-                      const ok = await confirmDanger({
-                        title: `Merge PR #${pr.number}`,
-                        message: `"${pr.title}" is squash-merged into ${pr.baseRef}. Merging cannot be undone from Companion.`,
-                        confirmLabel: 'Squash-merge',
-                      });
-                      if (ok) await data.merge('squash');
-                    })(),
-                },
-                {
-                  label: 'Close PR…',
-                  danger: true,
-                  disabled: data.busy,
-                  onSelect: () =>
-                    void (async () => {
-                      const ok = await confirmDanger({
-                        title: `Close PR #${pr.number}`,
-                        message: 'The pull request is closed on GitHub without merging.',
-                        confirmLabel: 'Close PR',
-                      });
-                      if (ok) await data.close();
-                    })(),
-                },
-              ]}
-            />
-          ) : null}
+          {prActions.length > 0 ? <ActionMenu label="More pull request actions" actions={prActions} /> : null}
           <a className="btn-ghost" href={pr.url} target="_blank" rel="noreferrer">
             GitHub ↗
           </a>
@@ -228,7 +244,71 @@ function PrHeader({ pr, data, mode }: { pr: PrRecord; data: UsePr; mode: Mode })
           onClose={() => setRunningPipeline(false)}
         />
       ) : null}
+      {runningAgent ? <RunAgentModal onRun={(text) => data.runAgent(text)} onClose={() => setRunningAgent(false)} /> : null}
     </header>
+  );
+}
+
+/** Free-form agent objective against this PR's branch (reached from the AI menu). */
+function RunAgentModal({
+  onRun,
+  onClose,
+}: {
+  onRun: (instructions: string) => Promise<void>;
+  onClose: () => void;
+}): JSX.Element {
+  const [instructions, setInstructions] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      // Success navigates to the run's building preview, unmounting the page.
+      await onRun(instructions.trim());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="✦ Run agent on this branch" onClose={onClose}>
+      <form className="flex flex-col gap-3" onSubmit={(e) => void submit(e)}>
+        <Field label="What should the agent do?">
+          <textarea
+            className="input min-h-28 resize-y"
+            required
+            minLength={8}
+            placeholder="e.g. tighten the error copy, add tests for the new endpoint, split the migration into two steps"
+            value={instructions}
+            onChange={(e) => setInstructions(e.target.value)}
+            autoFocus
+          />
+        </Field>
+        <p className="dim text-[13px]">
+          The agent works in a worktree on the PR&apos;s branch; you review the diff and approve before anything is
+          pushed.
+        </p>
+        <ErrorBar error={error} />
+        <FormActions>
+          <button type="button" className="btn-ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button className="btn" type="submit" disabled={busy || instructions.trim().length < 8}>
+            {busy ? (
+              <>
+                <Spinner /> Starting…
+              </>
+            ) : (
+              'Run agent'
+            )}
+          </button>
+        </FormActions>
+      </form>
+    </Modal>
   );
 }
 
@@ -244,6 +324,15 @@ function PrSidebar({ pr }: { pr: PrRecord }): JSX.Element {
         <RailRow label="Checks">
           {pr.checks ? <ChecksBadge checks={pr.checks} /> : <span className="dim">—</span>}
         </RailRow>
+        {pr.state === 'open' && pr.mergeable !== null ? (
+          <RailRow label="Merge">
+            {pr.mergeable ? (
+              <span className="badge-ok">clean</span>
+            ) : (
+              <span className="badge-danger">conflicts</span>
+            )}
+          </RailRow>
+        ) : null}
         {pr.reviewDecision ? (
           <RailRow label="Review">
             <span className={pr.reviewDecision === 'approved' ? 'badge-ok' : 'badge-warn'}>

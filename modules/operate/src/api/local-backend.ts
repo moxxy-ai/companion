@@ -139,6 +139,9 @@ export class LocalRunnerBackend implements RunnerBackend {
   async ensureClone(repo: string): Promise<void> {
     await this.checkouts.clone(repo);
   }
+  fetchOrigin(repo: string): Promise<void> {
+    return this.checkouts.fetch(repo);
+  }
   addWorktree(repo: string, key: string, branch: string, baseBranch: string): Promise<string> {
     return this.checkouts.addWorktree(repo, key, branch, baseBranch);
   }

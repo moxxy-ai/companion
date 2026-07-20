@@ -34,7 +34,7 @@ export class PrReviews {
     private readonly broadcast: (msg: SpaServerMessage) => void,
   ) {}
 
-  async analyzePr(repo: string, prNumber: number): Promise<PrReviewResult> {
+  async analyzePr(repo: string, prNumber: number, opts?: { context?: string }): Promise<PrReviewResult> {
     const pr = this.store.prs.get(repo, prNumber);
     if (!pr) throw new Error(`unknown PR ${repo}#${prNumber}`);
     const client = this.github({ repo });
@@ -55,9 +55,10 @@ export class PrReviews {
       cwd: this.checkouts.cloneDir(repo),
       repo,
       issueNumber: prNumber,
-      prompt: reviewPrompt(pr.title, pr.body, pr.author, pr.baseRef, clippedDiff, describeChecks(checksSummary)),
+      prompt: reviewPrompt(pr.title, pr.body, pr.author, pr.baseRef, clippedDiff, describeChecks(checksSummary), opts?.context),
       timeoutMs: 8 * 60_000,
-      resume: { type: 'pr-review', args: { repo, number: prNumber } },
+      // The caller's context rides along so a resumed review keeps its briefing.
+      resume: { type: 'pr-review', args: { repo, number: prNumber, ...(opts?.context ? { context: opts.context } : {}) } },
     });
 
     let verdict: PrReviewVerdict | null = null;
@@ -82,6 +83,11 @@ export class PrReviews {
     this.store.prReviews.insert(result);
     this.broadcast({ t: 'prs.changed', repo });
     return result;
+  }
+
+  /** Review history of a PR, newest first (for detail views, e.g. board tasks). */
+  listForPr(repo: string, prNumber: number): PrReviewResult[] {
+    return this.store.prReviews.listForPr(repo, prNumber);
   }
 
   /** Post the verdict to GitHub as a PR review. */
@@ -216,6 +222,7 @@ function reviewPrompt(
   baseRef: string,
   diff: string,
   checks: string,
+  context?: string,
 ): string {
   return `You are reviewing a GitHub pull request against the repository checked out in the current directory (branch ${baseRef}).
 
@@ -228,7 +235,7 @@ ${body || '(no description)'}
 
 ## CI pipelines
 ${checks}
-
+${context ? `\n## Review context\n${context}\n` : ''}
 ## Diff
 \`\`\`diff
 ${diff}

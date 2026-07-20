@@ -31,6 +31,8 @@ const stateSchema = z.object({ state: z.enum(['open', 'closed']) });
 // ---------- prs ----------
 
 const mergeSchema = z.object({ method: z.enum(['merge', 'squash', 'rebase']).default('squash') });
+/** Generous cap — a custom agent objective may carry pasted logs or specs. */
+const prAgentSchema = z.object({ instructions: z.string().trim().min(8).max(16_000) });
 
 // ---------- github accounts ----------
 
@@ -620,6 +622,37 @@ export default defineRoutes((ctx) => {
         const { fullName, pr } = requirePr(user, params.owner, params.name, params.number);
         try {
           return { run: await code.fixes.startReviewFix(fullName, pr.number) };
+        } catch (err) {
+          throw badRequest(String(err instanceof Error ? err.message : err));
+        }
+      },
+    }),
+
+    /** Conflict agent: merges the fresh base into the PR branch and resolves. */
+    route({
+      method: 'POST',
+      path: '/api/repos/:owner/:name/prs/:number/resolve-conflicts',
+      access: 'prs:act',
+      handler: async ({ params, user }) => {
+        const { fullName, pr } = requirePr(user, params.owner, params.name, params.number);
+        try {
+          return { run: await code.fixes.startConflictResolve(fullName, pr.number) };
+        } catch (err) {
+          throw badRequest(String(err instanceof Error ? err.message : err));
+        }
+      },
+    }),
+
+    /** Free-form agent: works ON the PR branch with a user-written objective. */
+    route({
+      method: 'POST',
+      path: '/api/repos/:owner/:name/prs/:number/agent',
+      access: 'prs:act',
+      body: prAgentSchema,
+      handler: async ({ params, body, user }) => {
+        const { fullName, pr } = requirePr(user, params.owner, params.name, params.number);
+        try {
+          return { run: await code.fixes.startCustomPrRun(fullName, pr.number, body.instructions) };
         } catch (err) {
           throw badRequest(String(err instanceof Error ? err.message : err));
         }

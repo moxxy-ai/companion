@@ -180,6 +180,9 @@ export class RemoteRunnerBackend implements RunnerBackend {
   async ensureClone(repo: string): Promise<void> {
     await this.call('POST', '/git/ensure-clone', { repo, ...(await this.ghToken(repo)) });
   }
+  async fetchOrigin(repo: string): Promise<void> {
+    await this.call('POST', '/git/fetch', { repo, ...(await this.ghToken(repo)) });
+  }
   async addWorktree(repo: string, key: string, branch: string, baseBranch: string): Promise<string> {
     return (
       await this.call<AgentWorktreeResponse>('POST', '/git/worktree', {

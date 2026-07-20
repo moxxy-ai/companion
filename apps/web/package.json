@@ -19,6 +19,7 @@
     "@companion/module-core": "workspace:*",
     "@companion/module-operate": "workspace:*",
     "@companion/module-plan": "workspace:*",
+    "@companion/module-refinement": "workspace:*",
     "@companion/module-workspace": "workspace:*",
     "@companion/ui": "workspace:*",
     "highlight.js": "^11.11.1",

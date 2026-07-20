@@ -6,6 +6,7 @@ import {
   useState,
   type KeyboardEvent,
   type MouseEvent,
+  type PointerEvent,
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -498,11 +499,14 @@ export function Modal({
   onClose,
   children,
   wide,
+  xl,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  /** Detail-heavy dialogs (side rails, review histories); supersedes `wide`. */
+  xl?: boolean;
 }): JSX.Element {
   // Portaled to <body>: a transformed ancestor (e.g. the animated sidebar)
   // would otherwise become the containing block and trap the overlay.
@@ -518,7 +522,7 @@ export function Modal({
       }}
     >
       <div
-        className={`anim-in my-6 w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900`}
+        className={`anim-in my-6 w-full ${xl ? 'max-w-5xl' : wide ? 'max-w-3xl' : 'max-w-lg'} overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-5 py-3.5 dark:border-zinc-800">
@@ -530,6 +534,101 @@ export function Modal({
         <div className="p-5">{children}</div>
       </div>
     </div>,
+    document.body,
+  );
+}
+
+/**
+ * Right-side detail drawer: portaled, full-height, resizable by dragging its
+ * left edge (or arrow keys on the handle); the chosen width persists under
+ * `storageKey`. Non-modal by design — the page behind stays interactive so a
+ * list can swap the drawer's subject; Escape (when no modal is stacked above,
+ * e.g. a confirm dialog) or the ✕ closes. The body is a container-query
+ * context (`@container`), so children adapt to the drawer's width, not the
+ * viewport's.
+ */
+export function Drawer({
+  title,
+  onClose,
+  children,
+  storageKey = 'companion.drawer.width',
+  defaultWidth = 720,
+  minWidth = 480,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+  /** localStorage key the resized width persists under. */
+  storageKey?: string;
+  defaultWidth?: number;
+  minWidth?: number;
+}): JSX.Element {
+  const [width, setWidth] = useState(() => {
+    const stored = Number(window.localStorage.getItem(storageKey));
+    return Number.isFinite(stored) && stored >= minWidth ? stored : defaultWidth;
+  });
+  const widthRef = useRef(width);
+  widthRef.current = width;
+
+  // Cap so the app shell (sidebar + a sliver of page) always stays visible.
+  const clampWidth = (w: number): number => Math.min(Math.max(w, minWidth), Math.max(minWidth, window.innerWidth - 300));
+  const persist = (w: number): void => window.localStorage.setItem(storageKey, String(Math.round(w)));
+
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent): void => {
+      if (e.key === 'Escape' && !document.querySelector('[aria-modal="true"]')) onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const startDrag = (e: PointerEvent<HTMLDivElement>): void => {
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    const onMove = (ev: globalThis.PointerEvent): void => setWidth(clampWidth(window.innerWidth - ev.clientX));
+    const onUp = (): void => {
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      persist(widthRef.current);
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+  };
+
+  return createPortal(
+    <aside
+      role="dialog"
+      aria-label={title}
+      className="fixed inset-y-0 right-0 z-30 flex"
+      style={{ width: `min(${width}px, 100vw)` }}
+    >
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={`Resize ${title}`}
+        tabIndex={0}
+        className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize outline-none transition-colors hover:bg-accent-500/50 focus-visible:bg-accent-500/50"
+        onPointerDown={startDrag}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            e.preventDefault();
+            const next = clampWidth(widthRef.current + (e.key === 'ArrowLeft' ? 32 : -32));
+            setWidth(next);
+            persist(next);
+          }
+        }}
+      />
+      <div className="anim-in flex min-w-0 flex-1 flex-col border-l border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-200 px-5 py-3.5 dark:border-zinc-800">
+          <h2 className="min-w-0 truncate text-sm font-semibold">{title}</h2>
+          <IconButton label={`Close ${title}`} onClick={onClose} className="-mr-1.5">
+            <CloseIcon />
+          </IconButton>
+        </div>
+        <div className="@container min-h-0 flex-1 overflow-y-auto p-5">{children}</div>
+      </div>
+    </aside>,
     document.body,
   );
 }

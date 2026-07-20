@@ -3,8 +3,8 @@ import { useLive } from '@companion/core/client';
 import type { BoardConfig, TaskRecord, WorkerView } from '../../contract/index.js';
 import { boardApi } from '../api.js';
 
-/** The whole board, kept live over board.changed (every engine transition broadcasts it). */
-export function useBoard(): {
+/** One workspace's board, kept live over board.changed (every engine transition broadcasts it). */
+export function useBoard(workspaceId: string | undefined): {
   tasks: TaskRecord[];
   workers: WorkerView[];
   config: BoardConfig | null;
@@ -20,8 +20,15 @@ export function useBoard(): {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    if (!workspaceId) {
+      setTasks([]);
+      setWorkers([]);
+      setConfig(null);
+      setLoaded(true);
+      return;
+    }
     try {
-      const snapshot = await boardApi.get();
+      const snapshot = await boardApi.get(workspaceId);
       setTasks(snapshot.tasks);
       setWorkers(snapshot.workers);
       setConfig(snapshot.config);
@@ -31,7 +38,7 @@ export function useBoard(): {
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [workspaceId]);
 
   useLive(refresh, (msg) => msg.t === 'board.changed');
 

@@ -24,6 +24,14 @@ export class PrReviewsStore {
     return row ? prReviewRowToResult(row) : undefined;
   }
 
+  /** Every review of a PR, newest first — the task/PR detail review history. */
+  listForPr(repo: string, prNumber: number, limit = 20): PrReviewResult[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM pr_reviews WHERE repo = ? AND pr_number = ? ORDER BY created_at DESC LIMIT ?`)
+      .all(repo, prNumber, limit) as PrReviewRow[];
+    return rows.map(prReviewRowToResult);
+  }
+
   latest(repo: string, prNumber: number): PrReviewResult | undefined {
     const row = this.db
       .prepare(`SELECT * FROM pr_reviews WHERE repo = ? AND pr_number = ? ORDER BY created_at DESC LIMIT 1`)

@@ -18,6 +18,7 @@ const createTaskSchema = z.object({
   repo: z.string().min(3).max(200),
   title: z.string().min(1).max(200),
   description: z.string().max(20_000).default(''),
+  acceptance: z.string().max(10_000).default(''),
   specId: z.string().max(100).nullable().default(null),
   attachments: attachmentsSchema,
   priority: prioritySchema.default(2),
@@ -27,6 +28,7 @@ const createTaskSchema = z.object({
 const updateTaskSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   description: z.string().max(20_000).optional(),
+  acceptance: z.string().max(10_000).optional(),
   specId: z.string().max(100).nullable().optional(),
   attachments: attachmentsSchema.optional(),
   priority: prioritySchema.optional(),
@@ -37,6 +39,7 @@ const moveTaskSchema = z.object({
 });
 
 const workerSchema = z.object({
+  workspaceId: z.string().min(1).max(100),
   name: z.string().min(1).max(60),
   role: z.enum(['developer', 'reviewer']),
 });
@@ -48,10 +51,12 @@ const updateWorkerSchema = z.object({
 });
 
 const configSchema = z.object({
+  workspaceId: z.string().min(1).max(100),
   autoReview: z.boolean().optional(),
   reviewerWorkerId: z.string().max(100).nullable().optional(),
   autoMerge: z.boolean().optional(),
   mergeMethod: z.enum(['merge', 'squash', 'rebase']).optional(),
+  mergeAccountId: z.string().max(100).nullable().optional(),
   autoFixCi: z.boolean().optional(),
   maxAttempts: z.number().int().min(1).max(10).optional(),
 });
@@ -65,7 +70,12 @@ export default defineRoutes((ctx) => {
       method: 'GET',
       path: '/api/board',
       access: 'board:read',
-      handler: ({ user }) => board.listBoard(user!),
+      handler: ({ user, query }) => {
+        const workspaceId = query.get('workspace') ?? '';
+        if (!workspaceId) throw badRequest('workspace is required');
+        if (!workspace.canAccessWorkspace(user!, workspaceId)) throw forbidden('no access to that workspace');
+        return board.listBoard(user!, workspaceId);
+      },
     }),
 
     route({
@@ -87,7 +97,7 @@ export default defineRoutes((ctx) => {
       handler: ({ body, user }) => {
         if (!workspace.canAccessRepo(user!, body.repo)) throw forbidden('no access to that repository');
         try {
-          return created({ task: board.createTask(body) });
+          return created({ task: board.createTask({ ...body, createdBy: user!.username }) });
         } catch (err) {
           throw badRequest(String(err instanceof Error ? err.message : err));
         }
@@ -114,6 +124,20 @@ export default defineRoutes((ctx) => {
         if (!board.getTask(user!, params.id)) throw notFound('task not found');
         try {
           return { task: await board.moveTask(params.id, body.to) };
+        } catch (err) {
+          throw badRequest(String(err instanceof Error ? err.message : err));
+        }
+      },
+    }),
+
+    route({
+      method: 'POST',
+      path: '/api/board/tasks/:id/merge',
+      access: 'board:manage',
+      handler: async ({ params, user }) => {
+        if (!board.getTask(user!, params.id)) throw notFound('task not found');
+        try {
+          return { task: await board.mergeNow(params.id) };
         } catch (err) {
           throw badRequest(String(err instanceof Error ? err.message : err));
         }
@@ -152,7 +176,10 @@ export default defineRoutes((ctx) => {
       path: '/api/board/workers',
       access: 'board:manage',
       body: workerSchema,
-      handler: ({ body }) => created({ worker: board.createWorker(body.name, body.role) }),
+      handler: ({ body, user }) => {
+        if (!workspace.canAccessWorkspace(user!, body.workspaceId)) throw forbidden('no access to that workspace');
+        return created({ worker: board.createWorker(body.workspaceId, body.name, body.role) });
+      },
     }),
 
     route({
@@ -188,9 +215,11 @@ export default defineRoutes((ctx) => {
       path: '/api/board/config',
       access: 'board:manage',
       body: configSchema,
-      handler: ({ body }) => {
+      handler: ({ body, user }) => {
+        const { workspaceId, ...patch } = body;
+        if (!workspace.canAccessWorkspace(user!, workspaceId)) throw forbidden('no access to that workspace');
         try {
-          return { config: board.setConfig(body) };
+          return { config: board.setConfig(workspaceId, patch) };
         } catch (err) {
           throw badRequest(String(err instanceof Error ? err.message : err));
         }

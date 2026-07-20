@@ -516,11 +516,6 @@ function WorkspaceSwitcher({ rail }: { rail: boolean }): JSX.Element {
         }}
       />
     ) : null;
-  const avatar = (
-    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-zinc-200 text-[13px] font-semibold uppercase dark:bg-zinc-800">
-      {(current?.name ?? '?').slice(0, 1)}
-    </span>
-  );
   if (rail) {
     // Collapsed: no glyph — just hold the switcher's slot so the nav below
     // doesn't shift; the ⌘K "Create workspace" intent stays live.
@@ -542,7 +537,6 @@ function WorkspaceSwitcher({ rail }: { rail: boolean }): JSX.Element {
         triggerClassName="flex h-12 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-800"
         renderTrigger={(selected, open) => (
           <>
-            {avatar}
             <span className="min-w-0 flex-1">
               <span className="dim block text-[10px] font-medium tracking-widest uppercase">Workspace</span>
               <span className="flex items-center gap-1.5">

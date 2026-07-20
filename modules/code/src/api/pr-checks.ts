@@ -76,9 +76,12 @@ export class PrChecks {
 
   /** Refresh snapshots for the most recently updated open PRs of a repo. */
   async refreshOpenPrs(repo: string, max = 25): Promise<void> {
+    // Skip snapshot-fresh PRs: this rides the 2-min sync tick at several GitHub
+    // requests per PR, and ungated it would eat the PAT budget on busy repos.
+    const now = Date.now();
     const open = this.store.prs
       .list(repo)
-      .filter((pr) => pr.state === 'open')
+      .filter((pr) => pr.state === 'open' && (!pr.checks || pr.checks.fetchedAt < now - 5 * 60_000))
       .slice(0, max);
     for (const pr of open) {
       await this.trySummary(repo, pr.number);
@@ -93,8 +96,11 @@ export class PrChecks {
       return { ...emptySnapshot(), repo, prNumber, headSha: pr?.headSha ?? null, runs: [] };
     }
 
-    // Two independent sources; one failing must not blank the other.
-    const [checkRuns, combined] = await Promise.all([
+    // Independent sources; one failing must not blank the others. The single-PR
+    // GET rides along because it is the only feed that carries `mergeable` —
+    // this cadence keeps conflict state fresh even when the PR itself is
+    // untouched (a sibling PR merging can turn it conflicted).
+    const [checkRuns, combined, ghPr] = await Promise.all([
       client.checkRuns(repo, pr.headSha).catch((err) => {
         log.warn('check-runs fetch failed', { repo, prNumber, err: String(err) });
         return [] as GhCheckRun[];
@@ -103,7 +109,14 @@ export class PrChecks {
         log.warn('combined-status fetch failed', { repo, prNumber, err: String(err) });
         return null as GhCombinedStatus | null;
       }),
+      client.pull(repo, prNumber).catch((err) => {
+        log.warn('mergeable fetch failed', { repo, prNumber, err: String(err) });
+        return null;
+      }),
     ]);
+    if (ghPr && ghPr.mergeable !== undefined) {
+      this.store.prs.setMergeable(repo, prNumber, ghPr.mergeable);
+    }
 
     const runs: CheckRunInfo[] = [
       ...checkRuns.map(fromCheckRun),

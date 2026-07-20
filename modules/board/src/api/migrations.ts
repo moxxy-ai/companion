@@ -68,6 +68,79 @@ export default defineMigrations([
   },
   {
     version: 2,
+    name: 'board_merge_account',
+    up: (db) => {
+      db.exec(`ALTER TABLE board_config ADD COLUMN merge_account_id TEXT`);
+    },
+    down: (db) => {
+      db.exec(`ALTER TABLE board_config DROP COLUMN merge_account_id`);
+    },
+  },
+  {
+    version: 3,
+    name: 'board_task_provenance',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE board_tasks ADD COLUMN acceptance TEXT NOT NULL DEFAULT '';
+        ALTER TABLE board_tasks ADD COLUMN created_by TEXT;
+        ALTER TABLE board_tasks ADD COLUMN first_worker TEXT;
+      `);
+    },
+    down: (db) => {
+      db.exec(`
+        ALTER TABLE board_tasks DROP COLUMN acceptance;
+        ALTER TABLE board_tasks DROP COLUMN created_by;
+        ALTER TABLE board_tasks DROP COLUMN first_worker;
+      `);
+    },
+  },
+  {
+    version: 4,
+    name: 'board_workspace_scope',
+    up: (db) => {
+      // Workers gain a workspace; config becomes one row PER workspace. Rows
+      // predating the scoping carry '' until boot adoption assigns them to the
+      // first workspace (board-service.adoptUnscoped).
+      db.exec(`
+        ALTER TABLE board_workers ADD COLUMN workspace_id TEXT NOT NULL DEFAULT '';
+        CREATE TABLE board_config_ws (
+          workspace_id TEXT PRIMARY KEY,
+          auto_review INTEGER NOT NULL DEFAULT 1,
+          reviewer_worker_id TEXT,
+          auto_merge INTEGER NOT NULL DEFAULT 1,
+          merge_method TEXT NOT NULL DEFAULT 'squash',
+          merge_account_id TEXT,
+          auto_fix_ci INTEGER NOT NULL DEFAULT 1,
+          max_attempts INTEGER NOT NULL DEFAULT 3
+        );
+        INSERT INTO board_config_ws (workspace_id, auto_review, reviewer_worker_id, auto_merge, merge_method, merge_account_id, auto_fix_ci, max_attempts)
+          SELECT '', auto_review, reviewer_worker_id, auto_merge, merge_method, merge_account_id, auto_fix_ci, max_attempts FROM board_config;
+        DROP TABLE board_config;
+        ALTER TABLE board_config_ws RENAME TO board_config;
+      `);
+    },
+    down: (db) => {
+      db.exec(`
+        ALTER TABLE board_workers DROP COLUMN workspace_id;
+        CREATE TABLE board_config_v1 (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          auto_review INTEGER NOT NULL DEFAULT 1,
+          reviewer_worker_id TEXT,
+          auto_merge INTEGER NOT NULL DEFAULT 1,
+          merge_method TEXT NOT NULL DEFAULT 'squash',
+          merge_account_id TEXT,
+          auto_fix_ci INTEGER NOT NULL DEFAULT 1,
+          max_attempts INTEGER NOT NULL DEFAULT 3
+        );
+        INSERT INTO board_config_v1 (id, auto_review, reviewer_worker_id, auto_merge, merge_method, merge_account_id, auto_fix_ci, max_attempts)
+          SELECT 1, auto_review, reviewer_worker_id, auto_merge, merge_method, merge_account_id, auto_fix_ci, max_attempts FROM board_config LIMIT 1;
+        DROP TABLE board_config;
+        ALTER TABLE board_config_v1 RENAME TO board_config;
+      `);
+    },
+  },
+  {
+    version: 5,
     name: 'board_task_attachments',
     up: (db) => {
       const columns = db.prepare(`PRAGMA table_info(board_tasks)`).all() as Array<{ name: string }>;

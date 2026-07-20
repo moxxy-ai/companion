@@ -118,6 +118,12 @@ export interface AgentEnsureCloneRequest {
   readonly githubToken?: string;
 }
 
+/** POST /agent/git/fetch — refresh all origin refs of an existing clone. */
+export interface AgentFetchRequest {
+  readonly repo: string;
+  readonly githubToken?: string;
+}
+
 /** POST /agent/git/worktree — create a fresh branch off a base (fetches). */
 export interface AgentWorktreeRequest {
   readonly repo: string;

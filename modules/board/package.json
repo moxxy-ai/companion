@@ -12,7 +12,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "pnpm run build && node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@companion/core": "workspace:*",
@@ -20,6 +21,7 @@
     "@companion/services": "workspace:*",
     "@companion/types": "workspace:*",
     "@companion/ui": "workspace:*",
+    "@companion/module-core": "workspace:*",
     "@companion/module-workspace": "workspace:*",
     "@companion/module-code": "workspace:*",
     "@companion/module-operate": "workspace:*",

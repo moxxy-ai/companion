@@ -30,10 +30,13 @@ export interface UsePr {
   readonly applyReview: (accountId?: string) => Promise<void>;
   readonly dismissReview: () => Promise<void>;
 
-  /** Repair agents — both open the building preview for the run they start. */
-  readonly agentBusy: 'checks' | 'reviews' | null;
+  /** Branch agents — each opens the building preview for the run it starts. */
+  readonly agentBusy: 'checks' | 'reviews' | 'conflicts' | 'custom' | null;
   readonly fixChecks: () => Promise<void>;
   readonly addressReviews: () => Promise<void>;
+  readonly resolveConflicts: () => Promise<void>;
+  /** Custom-objective agent; rejects on failure so the modal can show it inline. */
+  readonly runAgent: (instructions: string) => Promise<void>;
 
   /** Lifecycle actions. */
   readonly busy: boolean;
@@ -54,7 +57,7 @@ export function usePr(repo: string, number: number): UsePr {
   const [pipelines, setPipelines] = useState<PipelineRecord[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [agentBusy, setAgentBusy] = useState<'checks' | 'reviews' | null>(null);
+  const [agentBusy, setAgentBusy] = useState<'checks' | 'reviews' | 'conflicts' | 'custom' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -111,21 +114,27 @@ export function usePr(repo: string, number: number): UsePr {
     [refresh],
   );
 
-  // Repair agents push to the PR's own branch, so we follow the run into the
+  // Branch agents push to the PR's own branch, so we follow the run into the
   // building preview rather than the raw transcript.
   const startAgent = useCallback(
-    async (kind: 'checks' | 'reviews'): Promise<void> => {
+    async (
+      kind: 'checks' | 'reviews' | 'conflicts' | 'custom',
+      start: () => Promise<{ run: { id: string } }>,
+    ): Promise<void> => {
       setAgentBusy(kind);
       setError(null);
       try {
-        const { run } = await (kind === 'checks' ? api.fixChecks(repo, number) : api.addressReviews(repo, number));
+        const { run } = await start();
         location.hash = `#/runs/${run.id}/preview`;
       } catch (err) {
-        setError(String(err));
         setAgentBusy(null);
+        // The modal renders the custom agent's failure inline; menu actions
+        // surface theirs through the page ErrorBar.
+        if (kind === 'custom') throw err;
+        setError(String(err));
       }
     },
-    [repo, number],
+    [],
   );
 
   return {
@@ -144,8 +153,10 @@ export function usePr(repo: string, number: number): UsePr {
     applyReview: (accountId) => withBusy(() => api.applyPrReview(review!.id, accountId)),
     dismissReview: () => withBusy(() => api.dismissPrReview(review!.id)),
     agentBusy,
-    fixChecks: () => startAgent('checks'),
-    addressReviews: () => startAgent('reviews'),
+    fixChecks: () => startAgent('checks', () => api.fixChecks(repo, number)),
+    addressReviews: () => startAgent('reviews', () => api.addressReviews(repo, number)),
+    resolveConflicts: () => startAgent('conflicts', () => api.resolveConflicts(repo, number)),
+    runAgent: (instructions) => startAgent('custom', () => api.runPrAgent(repo, number, instructions)),
     busy,
     merge: (method = 'squash') => withBusy(() => api.mergePr(repo, number, method)),
     close: () => withBusy(() => api.closePr(repo, number)),

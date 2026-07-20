@@ -46,6 +46,8 @@ export interface RunnerBackend {
   hasClone(repo: string): Promise<boolean>;
   cloneDir(repo: string): Promise<string>;
   ensureClone(repo: string): Promise<void>;
+  /** Refresh all origin refs of the clone (e.g. a fresh base before a merge). */
+  fetchOrigin(repo: string): Promise<void>;
   addWorktree(repo: string, key: string, branch: string, baseBranch: string): Promise<string>;
   addWorktreeAtBranch(repo: string, key: string, branch: string): Promise<string>;
   removeWorktree(repo: string, cwd: string): Promise<void>;

@@ -125,6 +125,8 @@ export interface PrRecord {
   readonly reviewRisk: 'low' | 'medium' | 'high' | null;
   /** Human review decision on GitHub (folded per reviewer, latest wins). */
   readonly reviewDecision: 'approved' | 'changes_requested' | null;
+  /** Whether GitHub can merge cleanly; null = unknown (still computing / not fetched). */
+  readonly mergeable: boolean | null;
   /** Latest CI pipeline snapshot (null until first fetch). */
   readonly checks: ChecksSnapshot | null;
 }
