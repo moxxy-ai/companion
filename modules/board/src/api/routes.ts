@@ -23,6 +23,11 @@ const moveTaskSchema = z.object({
   to: z.enum(['backlog', 'ready', 'done']),
 });
 
+const resolveFailureSchema = z.object({
+  decision: z.enum(['retry', 'backlog', 'done']),
+  instructions: z.string().max(10_000).default(''),
+});
+
 const workerSchema = z.object({
   name: z.string().min(1).max(60),
   role: z.enum(['developer', 'reviewer']),

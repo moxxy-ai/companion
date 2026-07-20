@@ -36,6 +36,7 @@ interface TaskRow {
   review_recommendation: string | null;
   attempts: number;
   last_error: string | null;
+  human_instructions: string | null;
   created_at: number;
   updated_at: number;
   started_at: number | null;
@@ -79,6 +80,7 @@ function rowToTask(row: TaskRow): TaskRecord {
     reviewRecommendation: row.review_recommendation as TaskRecord['reviewRecommendation'],
     attempts: row.attempts,
     lastError: row.last_error,
+    humanInstructions: row.human_instructions,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     startedAt: row.started_at,
@@ -107,6 +109,7 @@ export interface TaskPatch {
   reviewRecommendation?: TaskRecord['reviewRecommendation'];
   attempts?: number;
   lastError?: string | null;
+  humanInstructions?: string | null;
   startedAt?: number | null;
   finishedAt?: number | null;
 }
@@ -127,6 +130,7 @@ const TASK_PATCH_COLUMNS: ReadonlyArray<[keyof TaskPatch, string]> = [
   ['reviewRecommendation', 'review_recommendation'],
   ['attempts', 'attempts'],
   ['lastError', 'last_error'],
+  ['humanInstructions', 'human_instructions'],
   ['startedAt', 'started_at'],
   ['finishedAt', 'finished_at'],
 ];
@@ -176,12 +180,12 @@ export class BoardStore {
         `INSERT INTO board_tasks (
            id, repo, title, description, spec_id, priority, status, stage,
            assigned_worker_id, run_id, branch, pr_number, pr_url,
-           review_risk, review_recommendation, attempts, last_error,
+           review_risk, review_recommendation, attempts, last_error, human_instructions,
            created_at, updated_at, started_at, finished_at
          ) VALUES (
            @id, @repo, @title, @description, @specId, @priority, @status, @stage,
            @assignedWorkerId, @runId, @branch, @prNumber, @prUrl,
-           @reviewRisk, @reviewRecommendation, @attempts, @lastError,
+           @reviewRisk, @reviewRecommendation, @attempts, @lastError, @humanInstructions,
            @createdAt, @updatedAt, @startedAt, @finishedAt
          )`,
       )

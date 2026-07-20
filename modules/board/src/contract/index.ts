@@ -79,6 +79,8 @@ export interface TaskRecord {
   /** Remediation cycles consumed (build failures, CI fixes, review rounds). */
   readonly attempts: number;
   readonly lastError: string | null;
+  /** Human guidance supplied after automation exhausted its attempt budget. */
+  readonly humanInstructions: string | null;
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly startedAt: number | null;

@@ -135,6 +135,7 @@ export class BoardService {
       reviewRecommendation: null,
       attempts: 0,
       lastError: null,
+      humanInstructions: null,
       createdAt: now,
       updatedAt: now,
       startedAt: null,
@@ -221,6 +222,54 @@ export class BoardService {
       throw new Error(`tasks cannot be moved to "${to}" by hand`);
     }
 
+    this.changed();
+    this.kick();
+    return this.store.getTask(id)!;
+  }
+
+  /** Human reviews an exhausted task and explicitly chooses its next step. */
+  async resolveFailure(
+    id: string,
+    decision: 'retry' | 'backlog' | 'done',
+    instructions: string,
+  ): Promise<TaskRecord> {
+    const task = this.store.getTask(id);
+    if (!task) throw new Error('task not found');
+    if (task.status !== 'failed') throw new Error('only a failed task can be resolved');
+    const guidance = instructions.trim();
+    if (decision === 'retry' && !guidance) throw new Error('tell the next worker what to do differently');
+
+    if (decision === 'retry') {
+      this.store.updateTask(id, {
+        status: 'ready',
+        stage: task.prNumber == null ? 'build' : 'address_review',
+        assignedWorkerId: null,
+        attempts: 0,
+        lastError: null,
+        humanInstructions: guidance,
+        finishedAt: null,
+      });
+      this.store.insertEvent(id, 'human_retry', guidance.slice(0, 2_000));
+    } else if (decision === 'backlog') {
+      this.store.updateTask(id, {
+        status: 'backlog',
+        stage: null,
+        assignedWorkerId: null,
+        lastError: null,
+        humanInstructions: guidance || null,
+      });
+      this.store.insertEvent(id, 'human_parked', guidance.slice(0, 2_000) || 'parked after review');
+    } else {
+      this.store.updateTask(id, {
+        status: 'done',
+        stage: null,
+        runId: null,
+        lastError: null,
+        humanInstructions: guidance || null,
+        finishedAt: Date.now(),
+      });
+      this.store.insertEvent(id, 'human_done', guidance.slice(0, 2_000) || 'accepted after review');
+    }
     this.changed();
     this.kick();
     return this.store.getTask(id)!;
@@ -487,7 +536,12 @@ export class BoardService {
 ## Task: ${task.title}
 
 ${task.description || '(no further description)'}
-${specSection}
+${specSection}${task.humanInstructions ? `
+## Human review and next-step guidance
+${task.humanInstructions}
+
+This guidance comes from the maintainer after earlier attempts failed. Treat it as authoritative and explicitly address it in your final summary.
+` : ''}
 ## Rules
 - Work ONLY inside this worktree.
 - Investigate the codebase, implement the task completely, and verify it (run existing tests, a build or a typecheck where possible).
@@ -745,7 +799,14 @@ ${specSection}
     this.store.insertEvent(taskId, 'attempt_failed', reason.slice(0, 500));
     if (attempts >= config.maxAttempts) {
       this.store.updateTask(taskId, { attempts, runId: null, status: 'failed', lastError: reason.slice(0, 500) });
-      this.notifyUser(task.repo, 'error', `Board task failed: ${task.title.slice(0, 60)}`, reason.slice(0, 200), '#/board');
+      this.store.insertEvent(taskId, 'human_review_requested', 'automatic attempts exhausted — waiting for a maintainer decision');
+      this.notifyUser(
+        task.repo,
+        'action_required',
+        `Board task needs your decision: ${task.title.slice(0, 60)}`,
+        `${reason.slice(0, 160)} Review the task and choose whether to retry with guidance, park it, or accept it as done.`,
+        '#/board',
+      );
     } else {
       const backTo: TaskPatch =
         task.stage && WORK_STAGES.has(task.stage)
@@ -777,7 +838,14 @@ ${specSection}
     this.reviewBackoff.delete(taskId);
     this.store.updateTask(taskId, { ...extra, status: 'failed', stage: null, runId: null, lastError: reason.slice(0, 500) });
     this.store.insertEvent(taskId, 'failed', reason.slice(0, 500));
-    this.notifyUser(task.repo, 'error', `Board task failed: ${task.title.slice(0, 60)}`, reason.slice(0, 200), '#/board');
+    this.store.insertEvent(taskId, 'human_review_requested', 'automation cannot continue — waiting for a maintainer decision');
+    this.notifyUser(
+      task.repo,
+      'action_required',
+      `Board task needs your decision: ${task.title.slice(0, 60)}`,
+      `${reason.slice(0, 160)} Review the task and choose what should happen next.`,
+      '#/board',
+    );
     this.changed();
   }
 

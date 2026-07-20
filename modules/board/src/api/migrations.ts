@@ -66,4 +66,17 @@ export default defineMigrations([
       `);
     },
   },
+  {
+    version: 2,
+    name: 'board_human_escalation',
+    up: (db) => {
+      const columns = db.prepare(`PRAGMA table_info(board_tasks)`).all() as Array<{ name: string }>;
+      if (!columns.some((column) => column.name === 'human_instructions')) {
+        db.exec(`ALTER TABLE board_tasks ADD COLUMN human_instructions TEXT`);
+      }
+    },
+    down: () => {
+      // Additive compatibility column: intentionally retained on module downgrade.
+    },
+  },
 ]);
