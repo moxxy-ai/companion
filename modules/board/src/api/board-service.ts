@@ -961,13 +961,6 @@ ${acceptance}${specSection}
       lastError: null,
     });
     this.store.insertEvent(taskId, stage === 'fix_ci' ? 'checks_failed' : 'changes_requested', `${reason} — bound back to its worker`);
-    this.notifyUser(
-      task.repo,
-      'info',
-      stage === 'fix_ci' ? `Board task is repairing CI: ${task.title.slice(0, 60)}` : `Board task is addressing review: ${task.title.slice(0, 60)}`,
-      `${reason}. The task has been returned to ${task.firstWorker ?? 'its developer'}.`,
-      `#/board?task=${taskId}`,
-    );
     this.changed();
     this.kick();
   }
@@ -995,13 +988,6 @@ ${acceptance}${specSection}
             : { status: 'ready', stage: 'build' };
       this.store.updateTask(taskId, { ...backTo, attempts, runId: null, assignedWorkerId: null, lastError: reason.slice(0, 500) });
       this.retryBackoff.set(taskId, Date.now() + RETRY_BACKOFF_MS);
-      this.notifyUser(
-        task.repo,
-        'error',
-        `Board task is retrying: ${task.title.slice(0, 60)}`,
-        `${reason.slice(0, 160)} · attempt ${attempts}/${config.maxAttempts}`,
-        `#/board?task=${taskId}`,
-      );
     }
     this.changed();
     this.kick();

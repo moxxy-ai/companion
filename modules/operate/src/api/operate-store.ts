@@ -1,5 +1,4 @@
 import type Database from 'better-sqlite3';
-import { legacyNotifications, type NotificationEmitter } from '@companion/core/server';
 import { RunsStore } from './runs-store.js';
 import { RunQueueStore } from './run-queue-store.js';
 import { RunnersStore } from './runners-store.js';
@@ -24,7 +23,6 @@ export class OperateStore {
   constructor(
     private readonly db: Database.Database,
     readonly settings: { get(key: string): string | null; set(key: string, value: string): void },
-    private readonly notify: NotificationEmitter,
   ) {
     this.runs = new RunsStore(db);
     this.runQueue = new RunQueueStore(db);
@@ -56,7 +54,4 @@ export class OperateStore {
       }
     },
   };
-
-  /** Legacy `notifications.insert({...})` call shape, routed through the shared emitter. */
-  readonly notifications = legacyNotifications(() => this.notify);
 }

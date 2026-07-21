@@ -37,10 +37,10 @@ Two behavioural classes, and the difference drives almost everything:
   `cwd`, the `permissions.json` deny rules, and the output-token ceiling, **not**
   a human clicking allow.
 
-`setStatus` is the single choke point for transitions; it persists the change
-and drops an inbox notification for the human-actionable ones (`review`,
-`completed`, `failed`). Route all status changes through it — don't write
-`runs.status` from elsewhere.
+`setStatus` is the single choke point for transitions and persists the change.
+Run lifecycle is audit state, so it never creates inbox notifications; the
+owning feature notifies for its action-level success or failure instead. Route
+all status changes through `setStatus` — don't write `runs.status` from elsewhere.
 
 ## The two ways to run an agent
 

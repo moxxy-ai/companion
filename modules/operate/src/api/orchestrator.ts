@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import type { AskRequest, HistorySegment, MoxxyEvent, PromptAttachment } from '@companion/types';
 import type { ModuleConfigAccessor } from '@companion/core';
 import type { SpaServerMessage } from '@companion/contracts';
-import type { NotificationKind } from '@companion/module-workspace/contract';
 import type {
   ModelCatalog,
   ModelCatalogModel,
@@ -14,7 +13,7 @@ import type {
   RunRecord,
 } from '../contract/index.js';
 import { log, paths, type DaemonConfig } from '@companion/services';
-import { rowToRun, type RunRow } from './runs-store.js';
+import { rowToRun } from './runs-store.js';
 import type { Checkouts } from '../exec/checkouts.js';
 import type { MoxxyCli } from '../exec/cli.js';
 import { Runners } from './runners-registry.js';
@@ -146,7 +145,6 @@ export class Orchestrator implements RunnerEventSink {
     }
     this.asksFor(runId).set(ask.requestId, ask);
     this.broadcast({ t: 'ask', runId, ask });
-    this.notifyRun(runId, 'action_required', 'Agent needs your input');
   }
 
   onAskResolved(runId: string, requestId: string): void {
@@ -347,55 +345,9 @@ export class Orchestrator implements RunnerEventSink {
     this.emitRunChanged(runId);
   }
 
-  /**
-   * Single choke point for status changes: persists the transition and drops
-   * an inbox notification for the ones a human acts on.
-   */
+  /** Run lifecycle is audit state, not a user action; owning features notify on their outcomes. */
   private setStatus(runId: string, status: RunRecord['status'], outcome?: string | null): void {
-    const prev = this.store.runs.get(runId)?.status;
     this.store.runs.updateStatus(runId, status, outcome);
-    if (prev === status) return;
-    // AI Help conversations are per-user chat, not reviewable work — they churn
-    // through completed/failed on every idle-reap and reset. Notifying would
-    // drop an instance-wide inbox entry (no repo → no workspace) that every
-    // user sees, so skip them entirely.
-    if (this.store.runs.get(runId)?.kind === 'assistant') return;
-    if (status === 'review') this.notifyRun(runId, 'action_required', 'Run ready for review');
-    else if (status === 'completed') this.notifyRun(runId, 'finished', 'Run completed');
-    else if (status === 'failed') this.notifyRun(runId, 'error', 'Run failed', outcome ?? undefined);
-  }
-
-  private notifyRun(runId: string, kind: NotificationKind, title: string, body?: string): void {
-    const run = this.store.runs.get(runId);
-    if (!run) return;
-    const workspaceId = run.repo ? (this.store.repos.get(run.repo)?.workspace_id ?? null) : null;
-    this.store.notifications.insert({
-      id: `ntf-${randomUUID().slice(0, 12)}`,
-      workspaceId,
-      kind,
-      title,
-      body: body ?? run.title,
-      href: this.runHref(run),
-      createdAt: Date.now(),
-    });
-  }
-
-  /**
-   * The section a run's notification opens. The raw transcript (#/runs/:id) is
-   * audit-only, so we route to the work itself: triage to its issue, reports to
-   * the digest, CI analysis to its PR, and PR-building runs to the outcome
-   * preview (which shows building / ready / shipped / failed).
-   */
-  private runHref(run: RunRow): string {
-    const repo = run.repo;
-    if (run.kind === 'triage' && repo && run.issue_number != null) {
-      return `#/repos/${repo}/issues/${run.issue_number}`;
-    }
-    if (run.kind === 'report') return '#/digest';
-    if (run.kind === 'analysis' && repo && run.issue_number != null) {
-      return `#/repos/${repo}/prs/${run.issue_number}`;
-    }
-    return `#/runs/${run.id}/preview`;
   }
 
   markRun(runId: string, status: RunRecord['status'], outcome?: string): void {

@@ -136,6 +136,45 @@ test('manual completion clears the reviewer blocker', async () => {
   db.close();
 });
 
+test('retry transitions stay silent until the task finally fails', () => {
+  const { db, store, notifications, makeService } = fixture();
+  insertTask(store);
+
+  const service = makeService();
+  service.attemptFail('tsk-1', 'first failure');
+  assert.equal(store.getTask('tsk-1').status, 'ready');
+  assert.equal(notifications.length, 0);
+
+  service.attemptFail('tsk-1', 'second failure');
+  assert.equal(store.getTask('tsk-1').status, 'ready');
+  assert.equal(notifications.length, 0);
+
+  service.attemptFail('tsk-1', 'final failure');
+  assert.equal(store.getTask('tsk-1').status, 'failed');
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].kind, 'error');
+  service.dispose();
+  db.close();
+});
+
+test('remediation work does not notify while it is running', () => {
+  const { db, store, notifications, makeService } = fixture();
+  insertTask(store, {
+    status: 'in_review',
+    stage: 'awaiting_review',
+    firstWorker: 'Developer',
+    prNumber: 14,
+    prUrl: 'https://example.test/pr/14',
+  });
+
+  const service = makeService();
+  service.bindBack('tsk-1', 'address_review', 'changes requested', store.getConfig('ws-1'));
+  assert.equal(store.getTask('tsk-1').status, 'ready');
+  assert.equal(notifications.length, 0);
+  service.dispose();
+  db.close();
+});
+
 test('deleting a blocked task removes its durable blocker state', async () => {
   const { db, store, makeService } = fixture();
   insertTask(store);

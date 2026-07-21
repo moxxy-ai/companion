@@ -68,7 +68,7 @@ export default defineServices(async (ctx) => {
 
   // Per-repo resolution, so delegated accounts / repo pins govern clones too.
   const checkouts = new Checkouts(githubTokenFor);
-  const store = new OperateStore(ctx.db, settings, ctx.notify);
+  const store = new OperateStore(ctx.db, settings);
   const orchestrator = new Orchestrator(store, ctx.config, checkouts, moxxyCli, broadcast, githubTokenFor, ctx.moduleConfig);
   const webhookTunnel = new WebhookTunnel(() => ctx.moduleConfig.get('webhookTunnel') === true, ctx.config.port);
   const skills = new Skills();
