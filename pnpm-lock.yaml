@@ -22,6 +22,9 @@ importers:
       '@companion/module-automations':
         specifier: workspace:*
         version: link:../../modules/automations
+      '@companion/module-billing':
+        specifier: workspace:*
+        version: link:../../modules/billing
       '@companion/module-board':
         specifier: workspace:*
         version: link:../../modules/board
@@ -117,6 +120,9 @@ importers:
       '@companion/module-automations':
         specifier: workspace:*
         version: link:../../modules/automations
+      '@companion/module-billing':
+        specifier: workspace:*
+        version: link:../../modules/billing
       '@companion/module-board':
         specifier: workspace:*
         version: link:../../modules/board
@@ -260,6 +266,43 @@ importers:
       zod:
         specifier: ^3.24.0
         version: 3.25.76
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.12
+        version: 7.6.13
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.0
+      '@types/react':
+        specifier: ^18.3.12
+        version: 18.3.31
+      better-sqlite3:
+        specifier: ^12.2.0
+        version: 12.11.1
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+
+  modules/billing:
+    dependencies:
+      '@companion/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@companion/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@companion/module-core':
+        specifier: workspace:*
+        version: link:../core
+      '@companion/module-workspace':
+        specifier: workspace:*
+        version: link:../workspace
+      '@companion/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.12

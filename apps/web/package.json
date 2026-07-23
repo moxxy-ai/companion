@@ -15,6 +15,7 @@
     "@companion/module-admin": "workspace:*",
     "@companion/module-automations": "workspace:*",
     "@companion/module-board": "workspace:*",
+    "@companion/module-billing": "workspace:*",
     "@companion/module-code": "workspace:*",
     "@companion/module-core": "workspace:*",
     "@companion/module-operate": "workspace:*",

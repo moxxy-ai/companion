@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true, "module": "ESNext", "moduleResolution": "bundler",
+    "customConditions": ["source"], "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"], "types": ["node"]
+  },
+  "include": ["src"]
+}
