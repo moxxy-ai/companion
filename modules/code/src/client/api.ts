@@ -13,6 +13,7 @@ import type {
   PrFileChange,
   PrRecord,
   PrReviewResult,
+  RepoAccountOption,
   RepoCandidate,
   RepoBranchRecord,
   RepoRecord,
@@ -49,6 +50,11 @@ export const codeApi = {
   syncRepo: (fullName: string) => post<{ issues: number; prs: number }>(`/api/repos/${fullName}/sync`),
   setRepoRunner: (fullName: string, runnerId: string | null) =>
     patch<{ repo: RepoRecord }>(`/api/repos/${fullName}/runner`, { runnerId }),
+  /** My accounts eligible for this repo, each graded by what it may do there. */
+  repoAccounts: (fullName: string) =>
+    request<{ accounts: RepoAccountOption[] }>(`/api/repos/${fullName}/accounts`),
+  setRepoAccount: (fullName: string, accountId: string | null) =>
+    put<{ accounts: RepoAccountOption[] }>(`/api/repos/${fullName}/account`, { accountId }),
 
   // workspace-scoped feeds
   workspaceRepos: (id: string) => request<{ repos: RepoRecord[] }>(`/api/workspaces/${id}/repos`),

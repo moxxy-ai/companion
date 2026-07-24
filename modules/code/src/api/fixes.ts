@@ -25,6 +25,12 @@ export class Fixes {
     private readonly orchestrator: Orchestrator,
     private readonly github: (repo?: string, username?: string | null) => GitHubClient | null,
     private readonly verifyGithub: (repo: string, username: string) => Promise<boolean>,
+    /** Account that may actually PUSH to the repo — resolved once per approval
+     *  so the branch and the PR it opens come from the same identity. */
+    private readonly pushClient: (
+      repo: string,
+      username: string,
+    ) => Promise<{ client: GitHubClient | null; tried: string[] }>,
     private readonly checks: PrChecks,
     private readonly broadcast: (msg: SpaServerMessage) => void,
   ) {}
@@ -268,9 +274,10 @@ export class Fixes {
     // originally created the run. Internal continuations omit the override and
     // remain bound to the persisted run owner.
     const credentialOwner = actorUsername === undefined ? run.user_id : actorUsername;
-    await this.requirePersonalAccess(run.repo, credentialOwner);
-    const client = this.github(run.repo, credentialOwner);
-    if (!client) throw new Error('GitHub is not configured');
+    // Write access is settled BEFORE anything is committed or pushed: a
+    // read-only account would otherwise reach git and fail with GitHub's
+    // opaque 403 after the agent already did all the work.
+    const client = await this.requirePushAccess(run.repo, credentialOwner);
 
     const backend = this.backendForRun(run.runner_id);
     await backend.commitAll(run.cwd, opts.title ?? run.title);
@@ -317,6 +324,21 @@ export class Fixes {
     if (!username || !(await this.verifyGithub(repo, username))) {
       throw new Error(`your GitHub accounts cannot access ${repo} — ask the repository owner to grant access`);
     }
+  }
+
+  /** The client of an account that may push here, or a diagnosis naming the
+   *  accounts that were tried and rejected. */
+  private async requirePushAccess(repo: string, username?: string | null): Promise<GitHubClient> {
+    if (!username) throw new Error(`no GitHub account owner for ${repo} — the run has no owning profile`);
+    const { client, tried } = await this.pushClient(repo, username);
+    if (!client) {
+      throw new Error(
+        `no connected GitHub account can push to ${repo}` +
+          (tried.length ? ` (tried ${tried.join(', ')})` : '') +
+          ' — grant that account write access, or connect one that has it',
+      );
+    }
+    return client;
   }
 }
 

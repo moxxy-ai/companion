@@ -3,6 +3,7 @@ import type { SpaServerMessage } from '@companion/contracts';
 import type { AgentStorageCleanupRequest } from '@companion/types';
 import type {
   CreateRunnerRequest,
+  GitCredentialResolver,
   ModelCatalogModel,
   ModelCatalogProvider,
   RunnerCatalog,
@@ -58,10 +59,7 @@ export class Runners {
     private readonly sink: RunnerEventSink,
     private readonly broadcast: (msg: SpaServerMessage) => void,
     /** Hub GitHub credential remote agents receive with network git calls. */
-    private readonly githubTokenFor: (
-      repo: string,
-      username?: string | null,
-    ) => Promise<string | null> | string | null = () => null,
+    private readonly githubTokenFor: GitCredentialResolver = () => null,
     private readonly storagePolicy: () => Omit<AgentStorageCleanupRequest, 'runs'> = () => ({
       worktreeRetentionMs: 3 * 24 * 60 * 60_000,
       scratchRetentionMs: 24 * 60 * 60_000,

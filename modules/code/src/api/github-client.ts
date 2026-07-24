@@ -67,6 +67,8 @@ export class GitHubClient {
     private: boolean;
     owner: { login: string };
     name: string;
+    /** What THIS token may do here — absent only on unauthenticated reads. */
+    permissions?: { admin?: boolean; maintain?: boolean; push?: boolean; triage?: boolean; pull?: boolean };
   }> {
     return this.get(`/repos/${fullName}`);
   }

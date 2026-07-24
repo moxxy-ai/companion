@@ -5,6 +5,7 @@ import type { AskRequest, HistorySegment, MoxxyEvent, PromptAttachment } from '@
 import type { ModuleConfigAccessor } from '@companion/core';
 import type { SpaServerMessage } from '@companion/contracts';
 import type {
+  GitCredentialResolver,
   ModelCatalog,
   ModelCatalogModel,
   ModelCatalogProvider,
@@ -101,10 +102,7 @@ export class Orchestrator implements RunnerEventSink {
     checkouts: Checkouts,
     moxxyCli: MoxxyCli | null,
     private readonly broadcast: (msg: SpaServerMessage) => void,
-    private readonly githubTokenFor: (
-      repo: string,
-      username?: string | null,
-    ) => Promise<string | null> | string | null = () => null,
+    private readonly githubTokenFor: GitCredentialResolver = () => null,
     private readonly moduleConfig: ModuleConfigAccessor = { values: () => ({}), get: () => null },
   ) {
     this.runners = new Runners(

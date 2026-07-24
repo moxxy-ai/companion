@@ -275,6 +275,7 @@ export function rowToRepo(row: RepoRow): RepoRecord {
     // A raw cache row cannot prove who is asking. Request routes replace this
     // only after checking one of the current profile's own accounts.
     githubAccessible: false,
+    githubPermission: null,
     autoTriage: row.auto_triage === 1,
     digestEnabled: row.digest_enabled === 1,
     staleSweepEnabled: row.stale_enabled === 1,

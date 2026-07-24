@@ -57,6 +57,13 @@ export interface RepoRecord {
   readonly openIssues: number;
   /** Proven against one of the current profile's own accounts for this response. */
   readonly githubAccessible: boolean;
+  /**
+   * The BEST permission the current profile's own accounts hold here, proven
+   * for this response; null when the repo is invisible to all of them. Actions
+   * gate on this so a user is never offered work their credentials can't land
+   * (writing needs 'push' or better; webhooks need 'admin').
+   */
+  readonly githubPermission: RepoPermission | null;
   /** Automation switches. */
   readonly autoTriage: boolean;
   readonly digestEnabled: boolean;
@@ -211,6 +218,44 @@ export interface TriageResult {
 export type GitHubPurpose = 'fetch' | 'runs' | 'pipelines' | 'webhooks';
 
 export const GITHUB_PURPOSES: readonly GitHubPurpose[] = ['fetch', 'runs', 'pipelines', 'webhooks'];
+
+/**
+ * GitHub's repository permission ladder, as reported for the resolving token —
+ * each level implies every level below it. Actions declare the LEAST level they
+ * need ('push' to write a branch, 'admin' to register a webhook) so a lack of
+ * rights is caught at resolution instead of surfacing as an opaque 403/404.
+ */
+export type RepoPermission = 'pull' | 'triage' | 'push' | 'maintain' | 'admin';
+
+export const REPO_PERMISSION_RANK: Record<RepoPermission, number> = {
+  pull: 1,
+  triage: 2,
+  push: 3,
+  maintain: 4,
+  admin: 5,
+};
+
+/** Plain wording for a permission level, for user-facing copy. */
+export const REPO_PERMISSION_LABEL: Record<RepoPermission, string> = {
+  pull: 'read-only',
+  triage: 'triage',
+  push: 'write',
+  maintain: 'maintain',
+  admin: 'admin',
+};
+
+/**
+ * One of the caller's own accounts as a candidate for acting on a repo, graded
+ * by what it may do there. `bound` marks the account this profile chose for the
+ * repo — a preference that wins resolution while it stays eligible, never a
+ * grant that could let another profile borrow the credential.
+ */
+export interface RepoAccountOption {
+  readonly id: string;
+  readonly login: string;
+  readonly permission: RepoPermission | null;
+  readonly bound: boolean;
+}
 
 /**
  * Which of the owner's workspaces a personal account may serve. This is a

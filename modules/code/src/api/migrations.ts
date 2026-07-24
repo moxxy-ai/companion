@@ -241,4 +241,26 @@ export default defineMigrations([
     },
     down: () => undefined,
   },
+  {
+    version: 5,
+    name: 'code_repo_account_bindings',
+    up: (db) => {
+      // Which of a profile's OWN accounts acts on a repo. Keyed by owner as
+      // well as repo: a global pin would let one user's background work borrow
+      // another's credential, which is exactly what the personal-account model
+      // removed. Absent row = fall back to normal precedence.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS repo_account_bindings (
+          repo       TEXT NOT NULL,
+          owner_id   TEXT NOT NULL,
+          account_id TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (repo, owner_id)
+        );
+      `);
+    },
+    down: (db) => {
+      db.exec(`DROP TABLE IF EXISTS repo_account_bindings`);
+    },
+  },
 ]);

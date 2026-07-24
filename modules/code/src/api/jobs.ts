@@ -21,9 +21,13 @@ export default defineJobs({
     // actually see the repo is the one that clones it.
     // Also feeds /api/status with the current request owner's GitHub identity.
     operate.setGithubTokenSource({
-      tokenFor: (repo, username) =>
+      tokenFor: (repo, username, access) =>
         repo
-          ? code.githubAccounts.verifiedTokenFor('runs', repo, username === undefined ? undefined : { username })
+          ? code.githubAccounts.verifiedTokenFor('runs', repo, {
+              ...(username === undefined ? {} : { username }),
+              // git only knows read vs write; map onto the RBAC ladder here.
+              need: access === 'write' ? 'push' : 'pull',
+            })
           : (code.githubAccounts.tokenFor('runs', username === undefined ? undefined : { username }) ?? null),
       login: () => code.githubAccounts.loginFor('fetch'),
     });

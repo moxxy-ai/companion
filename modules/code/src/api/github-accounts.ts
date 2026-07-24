@@ -1,9 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import {
+  GITHUB_PURPOSES,
+  REPO_PERMISSION_RANK as RANK,
   type GitHubAccountRecord,
   type GitHubAccountScope,
   type GitHubPurpose,
+  type RepoAccountOption,
   type RepoCandidate,
+  type RepoPermission,
 } from '../contract/index.js';
 import { log, currentUser } from '@companion/services';
 import { GitHubClient, GitHubError } from './github-client.js';
@@ -21,10 +25,37 @@ type ResolveCtx = {
   accountId?: string;
   username?: string | null;
   workspaceId?: string;
+  /**
+   * The LEAST repository permission this action needs. Seeing a repo is not the
+   * same as being allowed to change it: a read-only collaborator resolved for a
+   * push is only discovered deep inside git, as GitHub's opaque 403. Defaults
+   * to 'pull' so read paths are unaffected — writing callers say what they need.
+   */
+  need?: RepoPermission;
 };
+
+/**
+ * Grade GitHub's per-token `permissions` block onto the ladder. A payload
+ * without one cannot be judged — assume full rights so an unfamiliar response
+ * shape degrades to attempting the action rather than locking the user out.
+ */
+export function gradeRepoPermissions(
+  perms: { admin?: boolean; maintain?: boolean; push?: boolean; triage?: boolean; pull?: boolean } | undefined,
+): RepoPermission {
+  if (!perms) return 'admin';
+  if (perms.admin) return 'admin';
+  if (perms.maintain) return 'maintain';
+  if (perms.push) return 'push';
+  if (perms.triage) return 'triage';
+  return 'pull';
+}
 
 /** How long a repo-access probe result (per account) stays trusted. */
 const ACCESS_TTL_MS = 5 * 60_000;
+
+/** One probe of `GET /repos/:full` as this account: the highest permission it
+ *  holds there, or null when the repo is invisible to it. */
+type RepoReach = { readonly granted: RepoPermission | null; readonly at: number };
 
 /**
  * Registry of personal GitHub accounts (PATs). Every credential belongs to a
@@ -34,8 +65,8 @@ const ACCESS_TTL_MS = 5 * 60_000;
  */
 export class GitHubAccounts {
   private readonly clients = new Map<string, GitHubClient>();
-  /** `${accountId}:${repo}` → probed repo visibility (TTL'd, cleared on account changes). */
-  private readonly repoAccess = new Map<string, { readonly ok: boolean; readonly at: number }>();
+  /** `${accountId}:${repo}` → probed repo reach (TTL'd, cleared on account changes). */
+  private readonly repoAccess = new Map<string, RepoReach>();
 
   constructor(private readonly store: CodeStore) {}
 
@@ -140,25 +171,97 @@ export class GitHubAccounts {
 
   /**
    * Access-verified resolution for repo-bound work (clone/fetch/push, adding a
-   * repo): walk the candidates in precedence order and return the first that
-   * can actually SEE the repo, probing GitHub when several compete. `tried`
-   * lists the logins that were rejected — feed it into user-facing errors.
+   * repo): walk the candidates in precedence order and return the first with
+   * the requested reach, probing GitHub when several compete. `tried` lists the
+   * logins that were rejected — feed it into user-facing errors.
    */
   async verifiedRowFor(
     purpose: GitHubPurpose,
     fullName: string,
     ctx?: Omit<ResolveCtx, 'repo'>,
   ): Promise<{ row: GithubAccountRow | null; tried: string[] }> {
+    const need = ctx?.need ?? 'pull';
     const candidates = this.candidatesFor(purpose, { ...ctx, repo: fullName });
-    // A lone candidate is returned unprobed: whatever operation follows is its
-    // own probe, and there is no better account to fall over to anyway.
-    if (candidates.length <= 1) return { row: candidates[0] ?? null, tried: [] };
+    // A lone read-only candidate is returned unprobed: whatever operation
+    // follows is its own probe, and there is no better account to fall over to
+    // anyway. Anything ABOVE 'pull' always probes — "it fails later" is exactly
+    // the opaque 403-mid-push this resolution exists to prevent.
+    if (need === 'pull' && candidates.length <= 1) return { row: candidates[0] ?? null, tried: [] };
     const tried: string[] = [];
     for (const row of candidates) {
-      if (await this.hasAccess(row, fullName)) return { row, tried };
+      if (await this.hasAccess(row, fullName, need)) return { row, tried };
       tried.push(row.login || row.id);
     }
     return { row: null, tried };
+  }
+
+  /**
+   * Every account this profile could act with on a repo, each graded by what it
+   * may actually do there, and which one is bound. This is the picker's feed:
+   * choosing a credential is only meaningful when its reach is visible.
+   */
+  async accountsForRepo(fullName: string, ownerId: string): Promise<RepoAccountOption[]> {
+    const bound = this.store.githubAccounts.binding(fullName, ownerId);
+    // A binding is purpose-agnostic, so the candidate set is the union across
+    // purposes — an account connected only for 'fetch' is still bindable.
+    const seen = new Set<string>();
+    const candidates: GithubAccountRow[] = [];
+    for (const purpose of GITHUB_PURPOSES) {
+      for (const row of this.candidatesFor(purpose, { repo: fullName, username: ownerId })) {
+        if (!seen.has(row.id)) {
+          seen.add(row.id);
+          candidates.push(row);
+        }
+      }
+    }
+    return Promise.all(
+      candidates.map(async (row) => ({
+        id: row.id,
+        login: row.login,
+        permission: await this.grantedOn(row, fullName),
+        bound: row.id === bound,
+      })),
+    );
+  }
+
+  /** The account this profile bound to the repo (null when unset/ineligible). */
+  bindingFor(fullName: string, ownerId: string): string | null {
+    return this.store.githubAccounts.binding(fullName, ownerId);
+  }
+
+  /**
+   * Bind one of the caller's OWN accounts to a repo, or clear the binding.
+   * Ownership is re-checked here: a binding must never name a credential the
+   * caller could not already resolve for themselves.
+   */
+  bind(fullName: string, ownerId: string, accountId: string | null): void {
+    if (accountId !== null) {
+      const row = this.store.githubAccounts.list().find((a) => a.id === accountId);
+      if (!row || row.ownerId !== ownerId) throw new Error('choose one of your own connected GitHub accounts');
+    }
+    this.store.githubAccounts.setBinding(fullName, ownerId, accountId);
+  }
+
+  /**
+   * The best permission any of this profile's eligible accounts holds on the
+   * repo — null when none can even see it. This is the single signal the UI
+   * gates on, so a user is never offered an action their credentials cannot
+   * complete. Probes are shared with resolution (same TTL cache), so listing a
+   * workspace's repos costs one request per repo, not one per repo per action.
+   */
+  async permissionFor(
+    purpose: GitHubPurpose,
+    fullName: string,
+    ctx?: Omit<ResolveCtx, 'repo' | 'need'>,
+  ): Promise<RepoPermission | null> {
+    const candidates = this.candidatesFor(purpose, { ...ctx, repo: fullName });
+    let best: RepoPermission | null = null;
+    for (const row of candidates) {
+      const granted = await this.grantedOn(row, fullName);
+      if (granted && (!best || RANK[granted] > RANK[best])) best = granted;
+      if (best === 'admin') break;
+    }
+    return best;
   }
 
   async verifiedTokenFor(
@@ -167,7 +270,7 @@ export class GitHubAccounts {
     ctx?: Omit<ResolveCtx, 'repo'>,
   ): Promise<string | null> {
     const { row } = await this.verifiedRowFor(purpose, fullName, ctx);
-    if (!row || !(await this.hasAccess(row, fullName))) return null;
+    if (!row || !(await this.hasAccess(row, fullName, ctx?.need ?? 'pull'))) return null;
     return row.token;
   }
 
@@ -185,7 +288,7 @@ export class GitHubAccounts {
     // candidate. A caller asking specifically for a verified client needs the
     // stronger contract even then (write actions must not leak GitHub's opaque
     // 404 when the selected account cannot see this repository).
-    if (!(await this.hasAccess(row, fullName))) {
+    if (!(await this.hasAccess(row, fullName, ctx?.need ?? 'pull'))) {
       return { client: null, tried: [...tried, row.login || row.id] };
     }
     return { client: this.clientOf(row), tried };
@@ -208,7 +311,7 @@ export class GitHubAccounts {
     const tried: string[] = [];
     for (const row of candidates) {
       const label = row.login || row.id;
-      if (!(await this.hasAccess(row, fullName))) {
+      if (!(await this.hasAccess(row, fullName, ctx?.need ?? 'pull'))) {
         tried.push(label);
         continue;
       }
@@ -262,26 +365,34 @@ export class GitHubAccounts {
     return out.sort((a, b) => (b.pushedAt ?? 0) - (a.pushedAt ?? 0));
   }
 
-  /** Does this account see the repo? Probes `GET /repos/:fullName`, TTL-cached. */
-  private async hasAccess(row: GithubAccountRow, fullName: string): Promise<boolean> {
+  /** Does this account hold at least `need` on the repo? */
+  private async hasAccess(row: GithubAccountRow, fullName: string, need: RepoPermission = 'pull'): Promise<boolean> {
+    const granted = await this.grantedOn(row, fullName);
+    return granted !== null && RANK[granted] >= RANK[need];
+  }
+
+  /**
+   * The permission this account holds on the repo, or null if it cannot see it.
+   * Probes `GET /repos/:fullName`, TTL-cached: the response's `permissions`
+   * block is evaluated for THIS token, which is what makes a read-only
+   * collaborator distinguishable from one that may actually push.
+   */
+  private async grantedOn(row: GithubAccountRow, fullName: string): Promise<RepoPermission | null> {
     const key = `${row.id}:${fullName}`;
     const cached = this.repoAccess.get(key);
-    if (cached && Date.now() - cached.at < ACCESS_TTL_MS) return cached.ok;
+    if (cached && Date.now() - cached.at < ACCESS_TTL_MS) return cached.granted;
     try {
-      await this.clientOf(row).repo(fullName);
-      this.repoAccess.set(key, { ok: true, at: Date.now() });
-      return true;
+      const granted = gradeRepoPermissions((await this.clientOf(row).repo(fullName)).permissions);
+      this.repoAccess.set(key, { granted, at: Date.now() });
+      return granted;
     } catch (err) {
       // Authorization gates fail closed: an outage must not expose a cache
       // populated by someone else. Cache only definitive credential failures;
       // transient errors are retried on the next request.
       const definitive =
         err instanceof GitHubError && [401, 403, 404].includes(err.status) && !/rate limit/i.test(err.message);
-      if (definitive) {
-        this.repoAccess.set(key, { ok: false, at: Date.now() });
-        return false;
-      }
-      return false;
+      if (definitive) this.repoAccess.set(key, { granted: null, at: Date.now() });
+      return null;
     }
   }
 
@@ -299,13 +410,18 @@ export class GitHubAccounts {
     const candidates = this.candidatesFor(purpose, ctx);
     if (!ctx?.repo) return candidates[0];
     // Sync paths can't probe, but they can respect what probes already learned:
-    // skip candidates known (cached) to lack access to this repo.
+    // skip candidates known (cached) to lack the reach this call needs.
     const repo = ctx.repo;
-    const notKnownBad = (r: GithubAccountRow): boolean => {
+    const need = ctx.need ?? 'pull';
+    const holds = (r: GithubAccountRow): boolean | null => {
       const cached = this.repoAccess.get(`${r.id}:${repo}`);
-      return !cached || Date.now() - cached.at >= ACCESS_TTL_MS || cached.ok;
+      if (!cached || Date.now() - cached.at >= ACCESS_TTL_MS) return null; // unprobed
+      return cached.granted !== null && RANK[cached.granted] >= RANK[need];
     };
-    return candidates.find(notKnownBad);
+    // An account already KNOWN to hold the permission beats one whose reach is
+    // merely unprobed, so a sync path lands on the same account the verified
+    // (async) path would have chosen. Known-insufficient accounts are skipped.
+    return candidates.find((r) => holds(r) === true) ?? candidates.find((r) => holds(r) !== false);
   }
 
   /**
@@ -339,7 +455,16 @@ export class GitHubAccounts {
       return explicit ? [explicit] : [];
     }
 
-    // 2. The invoking user's own account, if it holds the purpose and is
+    // 2. The account this profile bound to the repo, when it is still eligible.
+    //    A stale binding (purpose removed, workspace narrowed) demotes rather
+    //    than blocks: it is a stated preference, not an authorization.
+    if (ctx?.repo) {
+      const boundId = this.store.githubAccounts.binding(ctx.repo, username);
+      const bound = boundId ? rows.find((r) => r.id === boundId && eligibleHere(r)) : undefined;
+      if (bound) ordered.push(bound);
+    }
+
+    // 3. The invoking user's own accounts, if they hold the purpose and are
     //    eligible here — a maintainer acts as themselves when they've connected.
     ordered.push(...rows.filter(eligibleHere));
 

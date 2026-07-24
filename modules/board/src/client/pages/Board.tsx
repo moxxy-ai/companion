@@ -28,8 +28,14 @@ import {
 } from '@companion/ui';
 import { useAuth } from '@companion/module-core/client';
 import { useWorkspace } from '@companion/module-workspace/client';
-import { BranchPicker, CommentsSection, codeApi, useWorkspaceRepos } from '@companion/module-code/client';
-import type { ChecksSnapshot, RepoRecord } from '@companion/module-code/contract';
+import {
+  BranchPicker,
+  CommentsSection,
+  RepoAccountPicker,
+  codeApi,
+  useWorkspaceRepos,
+} from '@companion/module-code/client';
+import { REPO_PERMISSION_RANK, type ChecksSnapshot, type RepoRecord } from '@companion/module-code/contract';
 import type {
   BoardConfig,
   SpecOption,
@@ -298,12 +304,44 @@ export default function Board({ query }: RouteProps): JSX.Element {
     if (window.location.hash.includes('?task=')) window.location.hash = '/board';
   }, []);
 
+  // The board is read one repository at a time: each repo has its own GitHub
+  // access and its own acting account, so the scope selector is also where
+  // those are stated. `null` means "not resolved yet" — the first render after
+  // a workspace switch picks a repo rather than dumping every repo's cards.
+  const [scope, setScope] = useState<string | null>(null);
+  useEffect(() => {
+    setScope(current?.id ? window.localStorage.getItem(scopeKey(current.id)) : null);
+  }, [current?.id]);
+  const repoOptions = useMemo(() => {
+    const names = new Set<string>([...repos.map((r) => r.fullName), ...tasks.map((t) => t.repo)]);
+    return [...names].sort();
+  }, [repos, tasks]);
+  useEffect(() => {
+    if (scope !== null || repoOptions.length === 0) return;
+    // Prefer a repo this profile can actually push to — that is where work lands.
+    setScope(repos.find(canBoardPush)?.fullName ?? repoOptions[0]!);
+  }, [scope, repoOptions, repos]);
+  const chooseScope = useCallback(
+    (value: string) => {
+      setScope(value);
+      if (current?.id) window.localStorage.setItem(scopeKey(current.id), value);
+    },
+    [current?.id],
+  );
+
+  const scopedRepo = scope && scope !== ALL_REPOS && repoOptions.includes(scope) ? scope : null;
+  const visibleTasks = useMemo(
+    () => (scopedRepo ? tasks.filter((t) => t.repo === scopedRepo) : tasks),
+    [tasks, scopedRepo],
+  );
+  const scopedRecord = scopedRepo ? repos.find((r) => r.fullName === scopedRepo) : undefined;
+
   const autoMerge = config?.autoMerge ?? true;
   const byColumn = useMemo(() => {
     const map = new Map<ColumnKey, TaskRecord[]>(COLUMNS.map((c) => [c.key, []]));
-    for (const t of tasks) map.get(needsDecision(t, autoMerge) ? 'needs_decision' : t.status)?.push(t);
+    for (const t of visibleTasks) map.get(needsDecision(t, autoMerge) ? 'needs_decision' : t.status)?.push(t);
     return map;
-  }, [tasks, autoMerge]);
+  }, [visibleTasks, autoMerge]);
 
   const workerName = useCallback(
     (id: string | null) => (id ? (workers.find((w) => w.id === id)?.name ?? 'unknown') : null),
@@ -366,7 +404,7 @@ export default function Board({ query }: RouteProps): JSX.Element {
   if (!loaded) return <PageLoading label="Loading the board…" />;
 
   const busyCount = workers.filter((w) => w.busy).length;
-  const inFlight = tasks.filter((t) => t.status === 'in_progress' || t.status === 'in_review').length;
+  const inFlight = visibleTasks.filter((t) => t.status === 'in_progress' || t.status === 'in_review').length;
   const decisions = byColumn.get('needs_decision')?.length ?? 0;
 
   return (
@@ -379,6 +417,30 @@ export default function Board({ query }: RouteProps): JSX.Element {
         }
         actions={
           <>
+            {repoOptions.length > 1 ? (
+              <div className="w-56">
+                <Dropdown
+                  ariaLabel="Repository scope"
+                  value={scopedRepo ?? ALL_REPOS}
+                  onChange={chooseScope}
+                  options={[
+                    ...repoOptions.map((fullName) => {
+                      const record = repos.find((r) => r.fullName === fullName);
+                      return {
+                        value: fullName,
+                        label: repoLabel(fullName),
+                        hint: record && !canBoardPush(record) ? accessHint(record) : undefined,
+                      };
+                    }),
+                    { value: ALL_REPOS, label: 'All repositories' },
+                  ]}
+                  searchable={repoOptions.length > 6}
+                />
+              </div>
+            ) : null}
+            {/* Which of my credentials acts on the scoped repo. Hidden unless
+                several of my accounts are eligible — nothing to decide then. */}
+            {scopedRepo ? <RepoAccountPicker repo={scopedRepo} className="w-44" /> : null}
             <button className="btn-ghost" onClick={() => setManagingWorkers(true)}>
               Workers
             </button>
@@ -392,6 +454,14 @@ export default function Board({ query }: RouteProps): JSX.Element {
         }
       />
       <ErrorBar error={error} className="mb-3" />
+      {scopedRecord && !canBoardPush(scopedRecord) ? (
+        <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+          {scopedRecord.githubPermission === null
+            ? `None of your connected GitHub accounts can see ${scopedRepo}. Connect one with access to work on it here.`
+            : `Your GitHub access to ${scopedRepo} is read-only, so the board cannot push a branch or open a pull request. ` +
+              `Existing cards stay put; grant write access and they start on their own.`}
+        </div>
+      ) : null}
       {workers.filter((w) => w.enabled && w.role === 'developer').length === 0 ? (
         <div className="mb-4">
           <EmptyState
@@ -473,7 +543,13 @@ export default function Board({ query }: RouteProps): JSX.Element {
       </div>
 
       {creating && current ? (
-        <NewTaskModal workspaceId={current.id} repos={repos} onClose={() => setCreating(false)} onError={setError} />
+        <NewTaskModal
+          workspaceId={current.id}
+          repos={repos}
+          defaultRepo={scopedRepo}
+          onClose={() => setCreating(false)}
+          onError={setError}
+        />
       ) : null}
       {detailId ? (
         <TaskDetailDrawer id={detailId} allTasks={tasks} workerName={workerName} onClose={closeDetail} onError={setError} />
@@ -635,14 +711,36 @@ function TaskCard({
   );
 }
 
+/** Sentinel for the unscoped board — repo full names always contain a slash. */
+const ALL_REPOS = '*';
+
+/** The scope choice is per workspace and survives reloads. */
+function scopeKey(workspaceId: string): string {
+  return `companion.board.repo:${workspaceId}`;
+}
+
+/** Board work needs write: it pushes the branch and opens the PR for you. */
+function canBoardPush(repo: RepoRecord): boolean {
+  return repo.githubPermission !== null && REPO_PERMISSION_RANK[repo.githubPermission] >= REPO_PERMISSION_RANK.push;
+}
+
+function accessHint(repo: RepoRecord): string {
+  return repo.githubPermission === null
+    ? 'no connected account can see this repo'
+    : 'read-only access — the board cannot push here';
+}
+
 function NewTaskModal({
   workspaceId,
   repos,
+  defaultRepo,
   onClose,
   onError,
 }: {
   workspaceId: string;
   repos: readonly RepoRecord[];
+  /** The board's current repo scope — the task almost always belongs to it. */
+  defaultRepo: string | null;
   onClose: () => void;
   onError: (e: string | null) => void;
 }): JSX.Element {
@@ -658,7 +756,11 @@ function NewTaskModal({
   const [queue, setQueue] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  const effectiveRepo = repo ?? repos.find((candidate) => candidate.githubAccessible)?.fullName ?? null;
+  // The board itself pushes the branch and opens the PR, so a repo the profile
+  // can only read cannot host a task — offering one would queue work that dies
+  // at the push. Fall back to the first writable repo when the scope is unusable.
+  const scoped = defaultRepo ? repos.find((r) => r.fullName === defaultRepo) : undefined;
+  const effectiveRepo = repo ?? (scoped && canBoardPush(scoped) ? scoped.fullName : null) ?? repos.find(canBoardPush)?.fullName ?? null;
 
   useEffect(() => {
     setTargetBranch(repos.find((candidate) => candidate.fullName === effectiveRepo)?.defaultBranch || 'main');
@@ -715,8 +817,8 @@ function NewTaskModal({
             options={repos.map((r) => ({
               value: r.fullName,
               label: r.fullName,
-              disabled: !r.githubAccessible,
-              hint: r.githubAccessible ? undefined : 'GitHub access required',
+              disabled: !canBoardPush(r),
+              hint: canBoardPush(r) ? undefined : accessHint(r),
             }))}
             searchable
           />

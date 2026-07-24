@@ -5,13 +5,14 @@ import type { AuthUser } from '@companion/contracts';
 import type { RunRecord } from '@companion/module-operate/contract';
 import type { WorkspaceRecord } from '@companion/module-workspace/contract';
 import { log, paths } from '@companion/services';
-import type { CommentRecord, PrFileChange } from '../contract/index.js';
+import type { CommentRecord, PrFileChange, RepoPermission } from '../contract/index.js';
 import { savePipelineSchema, saveStepDefinitionSchema } from './pipelines.js';
 import { rowToRepo } from './repos-store.js';
 import { TriageStore } from './triage-store.js';
 import { PrReviewsStore } from './pr-reviews-store.js';
 import { PipelinesStore } from './pipelines-store.js';
 import { GitHubError } from './github-client.js';
+import { gradeRepoPermissions } from './github-accounts.js';
 
 // ---------- repos ----------
 
@@ -155,19 +156,29 @@ export default defineRoutes((ctx) => {
     }
   };
 
-  const accessibleRepoNames = async (user: AuthUser, workspaceId: string): Promise<string[]> => {
+  /**
+   * The permission the caller's own accounts hold on each repo of a workspace.
+   * One probe per repo (TTL-cached alongside credential resolution), so every
+   * consumer — pickers, the board, automations — gates on the same graded truth
+   * instead of re-deriving "can I?" per action.
+   */
+  const repoPermissions = async (user: AuthUser, workspaceId: string): Promise<Map<string, RepoPermission>> => {
     const rows = code.repos.listByWorkspace(workspaceId);
-    const access = await Promise.all(
+    const graded = await Promise.all(
       rows.map(async (row) => {
-        const { client } = await code.githubAccounts.verifiedClientFor('fetch', row.full_name, {
+        const permission = await code.githubAccounts.permissionFor('fetch', row.full_name, {
           username: user.username,
           workspaceId,
         });
-        return client ? row.full_name : null;
+        return permission ? ([row.full_name, permission] as const) : null;
       }),
     );
-    return access.filter((repo): repo is string => repo !== null);
+    return new Map(graded.filter((entry): entry is readonly [string, RepoPermission] => entry !== null));
   };
+
+  const accessibleRepoNames = async (user: AuthUser, workspaceId: string): Promise<string[]> => [
+    ...(await repoPermissions(user, workspaceId)).keys(),
+  ];
 
   // Access gate for the workspace feeds: a private workspace the user isn't in
   // reads as "not found" — same helper as module-workspace's routes.
@@ -277,13 +288,14 @@ export default defineRoutes((ctx) => {
         return {
           repos: await Promise.all(
             rows.map(async (row) => {
-              const { client } = await code.githubAccounts.verifiedClientFor('fetch', row.full_name, {
+              const permission = await code.githubAccounts.permissionFor('fetch', row.full_name, {
                 username: user!.username,
               });
               return {
                 ...rowToRepo(row),
-                githubAccessible: client !== null,
-                openIssues: client ? code.issues.list(row.full_name, 'open').length : 0,
+                githubAccessible: permission !== null,
+                githubPermission: permission,
+                openIssues: permission ? code.issues.list(row.full_name, 'open').length : 0,
               };
             }),
           ),
@@ -405,7 +417,11 @@ export default defineRoutes((ctx) => {
         })();
         ctx.broadcast({ t: 'repos.changed' });
         return created({
-          repo: { ...rowToRepo(code.repos.getInWorkspace(meta.full_name, body.workspaceId)!), githubAccessible: true },
+          repo: {
+            ...rowToRepo(code.repos.getInWorkspace(meta.full_name, body.workspaceId)!),
+            githubAccessible: true,
+            githubPermission: gradeRepoPermissions(meta.permissions),
+          },
         });
       },
     }),
@@ -476,6 +492,39 @@ export default defineRoutes((ctx) => {
         code.repos.setRunner(fullName, body.runnerId);
         ctx.broadcast({ t: 'repos.changed' });
         return { repo: rowToRepo(code.repos.get(fullName)!) };
+      },
+    }),
+
+    /**
+     * Which of MY accounts can act on this repo, and what each may do there.
+     * Personal by construction: the list is the caller's own accounts, so it
+     * discloses nothing about anyone else's credentials.
+     */
+    route({
+      method: 'GET',
+      path: '/api/repos/:owner/:name/accounts',
+      access: 'repos:read',
+      handler: async ({ params, user }) => {
+        const { fullName } = requireRepo(user, params.owner, params.name);
+        return { accounts: await code.githubAccounts.accountsForRepo(fullName, user!.username) };
+      },
+    }),
+
+    /** Bind one of my accounts to this repo (null clears it back to automatic). */
+    route({
+      method: 'PUT',
+      path: '/api/repos/:owner/:name/account',
+      access: 'repos:read',
+      body: z.object({ accountId: z.string().max(60).nullable() }),
+      handler: async ({ params, body, user }) => {
+        const { fullName } = requireRepo(user, params.owner, params.name);
+        try {
+          code.githubAccounts.bind(fullName, user!.username, body.accountId);
+        } catch (err) {
+          throw badRequest(String(err instanceof Error ? err.message : err));
+        }
+        ctx.broadcast({ t: 'repos.changed' });
+        return { accounts: await code.githubAccounts.accountsForRepo(fullName, user!.username) };
       },
     }),
 
@@ -1080,13 +1129,17 @@ export default defineRoutes((ctx) => {
       handler: async ({ params, user }) => {
         requireWorkspace(user, params.id);
         const rows = code.repos.listByWorkspace(params.id);
-        const accessible = new Set(await accessibleRepoNames(user!, params.id));
+        const permissions = await repoPermissions(user!, params.id);
         return {
-          repos: rows.map((row) => ({
-            ...rowToRepo(row),
-            githubAccessible: accessible.has(row.full_name),
-            openIssues: accessible.has(row.full_name) ? code.issues.list(row.full_name, 'open').length : 0,
-          })),
+          repos: rows.map((row) => {
+            const permission = permissions.get(row.full_name) ?? null;
+            return {
+              ...rowToRepo(row),
+              githubAccessible: permission !== null,
+              githubPermission: permission,
+              openIssues: permission ? code.issues.list(row.full_name, 'open').length : 0,
+            };
+          }),
         };
       },
     }),

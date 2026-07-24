@@ -558,6 +558,10 @@ export class BoardService {
       // Ready and the worker unclaimed; a terminal run event (or heartbeat)
       // retries dispatch until capacity appears.
       if (!this.operate.runners.hasFreeCapacity(task.repo, 'board.worker', task.createdBy)) continue;
+      // The board pushes and opens the PR on the agent's behalf, so push rights
+      // are settled BEFORE dispatch: a build nobody can push is a wasted run
+      // that only fails at the very end. Held in Ready — not a failed attempt.
+      if (!(await this.canPush(task))) continue;
       const ws = task.workspaceId;
       const free = freeByWs.get(ws);
       if (!free || free.size === 0) {
@@ -600,6 +604,39 @@ export class BoardService {
       if (!fresh || fresh.status !== 'ready') continue;
       await this.startWork(fresh, worker);
     }
+  }
+
+  /**
+   * Can this task's owner push to its repo? The board is the pusher-of-record,
+   * so an owner whose accounts can only READ the repo produces a build that
+   * dies at `git push`. Blocking here holds the card untouched (no attempt
+   * consumed) until access is granted — the next tick then starts it.
+   */
+  private async canPush(task: TaskRecord): Promise<boolean> {
+    if (!task.createdBy) {
+      this.notifyBlocker(
+        task,
+        'github',
+        'Board task has no GitHub owner',
+        `${task.title} has no owning profile, so no personal GitHub credential can be resolved for ${task.repo}.`,
+      );
+      return false;
+    }
+    const { client, tried } = await this.code.githubAccounts
+      .verifiedClientFor('runs', task.repo, { username: task.createdBy, need: 'push' })
+      .catch(() => ({ client: null, tried: [] as string[] }));
+    if (!client) {
+      this.notifyBlocker(
+        task,
+        'github',
+        'Board task cannot push to GitHub',
+        `No connected GitHub account can push to ${task.repo}${tried.length ? ` (tried ${tried.join(', ')})` : ''}. ` +
+          `Grant that account write access — the task starts on its own once it lands.`,
+      );
+      return false;
+    }
+    this.clearBlocker(task.id, 'github');
+    return true;
   }
 
   /** True when a prerequisite still exists and isn't done yet. */
@@ -1029,6 +1066,8 @@ ${acceptance}${specSection}
         {
           username: task.createdBy,
           workspaceId: task.workspaceId,
+          // Merging writes to the repo; a read-only account can only 403 here.
+          need: 'push',
         },
       );
       if (!client || !result) {
@@ -1170,6 +1209,7 @@ ${acceptance}${specSection}
   private clearBlockers(taskId: string): void {
     this.clearBlocker(taskId, 'developer');
     this.clearBlocker(taskId, 'reviewer');
+    this.clearBlocker(taskId, 'github');
   }
 
   private notifyUser(task: TaskRecord, kind: 'finished' | 'error' | 'info' | 'action_required', title: string, body: string, href: string): void {

@@ -25,6 +25,7 @@ import {
 } from '@companion/ui';
 import type { RepoCandidate, RepoRecord } from '../../contract/index.js';
 import { codeApi as api } from '../api.js';
+import { RepoAccountPicker } from '../components/RepoAccountPicker.js';
 import { useReposAdmin } from '../hooks/useReposAdmin.js';
 
 /**
@@ -262,6 +263,9 @@ function RepoCard({
         <button className="btn-ghost" disabled={busy || workspaces.length < 2} title={workspaces.length < 2 ? 'Create another workspace to transfer' : undefined} onClick={() => setTransferring(true)}>
           Transfer…
         </button>
+        {/* Which of the viewer's own credentials acts here. Renders nothing
+            when they have only one — then there is no decision to make. */}
+        <RepoAccountPicker repo={repo.fullName} className="w-44" />
         {/* A pin is pointless while only the local runner exists — hide it. */}
         {runners.length > 1 ? (
           <select

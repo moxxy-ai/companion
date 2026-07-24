@@ -18,7 +18,7 @@ import type {
 } from '@companion/types';
 import { RUNNER_AGENT_PROTOCOL } from '@companion/types';
 import { log } from '@companion/services';
-import type { RunnerHealth } from '../contract/index.js';
+import type { GitAccess, GitCredentialResolver, RunnerHealth } from '../contract/index.js';
 import { MIN_MOXXY_VERSION } from '../exec/cli.js';
 import type { RunnerBackend, RunnerEventSink } from './backend.js';
 
@@ -47,10 +47,7 @@ export class RemoteRunnerBackend implements RunnerBackend {
     private readonly endpoint: string,
     private readonly token: string,
     private readonly sink: RunnerEventSink,
-    private readonly githubTokenFor: (
-      repo: string,
-      username?: string | null,
-    ) => Promise<string | null> | string | null,
+    private readonly githubTokenFor: GitCredentialResolver,
     /** Event-stream up/down transitions — the registry probes on both edges. */
     private readonly onStreamState?: (up: boolean) => void,
   ) {
@@ -243,7 +240,7 @@ export class RemoteRunnerBackend implements RunnerBackend {
     await this.call('POST', '/git/commit-all', { cwd, message });
   }
   async push(repo: string, cwd: string, branch: string, username?: string | null): Promise<void> {
-    await this.call('POST', '/git/push', { repo, cwd, branch, ...(await this.ghToken(repo, username)) });
+    await this.call('POST', '/git/push', { repo, cwd, branch, ...(await this.ghToken(repo, username, 'write')) });
   }
 
   cleanupStorage(request: AgentStorageCleanupRequest): Promise<AgentStorageCleanupResponse> {
@@ -253,9 +250,19 @@ export class RemoteRunnerBackend implements RunnerBackend {
 
   /** Every remote network operation carries the run owner's verified token;
    * never let the runner fall back to a machine-wide credential. */
-  private async ghToken(repo: string, username?: string | null): Promise<{ githubToken: string }> {
-    const token = await this.githubTokenFor(repo, username);
-    if (!token) throw new Error(`no personal GitHub credential with access to ${repo}`);
+  private async ghToken(
+    repo: string,
+    username?: string | null,
+    access: GitAccess = 'read',
+  ): Promise<{ githubToken: string }> {
+    const token = await this.githubTokenFor(repo, username, access);
+    if (!token) {
+      throw new Error(
+        access === 'write'
+          ? `no personal GitHub credential with push access to ${repo} — connect an account with write access, or ask the repository owner to grant it`
+          : `no personal GitHub credential with access to ${repo}`,
+      );
+    }
     return { githubToken: token };
   }
 

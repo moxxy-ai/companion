@@ -142,8 +142,13 @@ export default defineServices((ctx) => {
     operate.orchestrator,
     operate.checkouts,
     (c) => ghAccounts.clientFor('pipelines', c),
+    // Merging is a write action: skip accounts that can only read the repo
+    // rather than burning a failover round on a guaranteed 403.
     (repo, prNumber, method, c) =>
-      ghAccounts.performForRepo('pipelines', repo, (client) => client.mergePr(repo, prNumber, method), c),
+      ghAccounts.performForRepo('pipelines', repo, (client) => client.mergePr(repo, prNumber, method), {
+        ...c,
+        need: 'push',
+      }),
     prChecks,
     ctx.broadcast,
   );
@@ -161,6 +166,7 @@ export default defineServices((ctx) => {
       ),
     async (repo, username) =>
       (await ghAccounts.verifiedClientFor('runs', repo, { username })).client !== null,
+    (repo, username) => ghAccounts.verifiedClientFor('runs', repo, { username, need: 'push' }),
     prChecks,
     ctx.broadcast,
   );

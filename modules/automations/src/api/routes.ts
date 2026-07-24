@@ -123,11 +123,16 @@ export default defineRoutes((ctx) => {
         if (!account || account.ownerId !== user!.username || !account.purposes.includes('webhooks')) {
           throw badRequest('choose one of your GitHub accounts enabled for webhooks');
         }
+        // Registering a webhook is an admin-level repository action; without
+        // that grade GitHub answers 404 and the failure reads as "missing repo".
         const { client } = await code.githubAccounts.verifiedClientFor('webhooks', fullName, {
           accountId: account.id,
           username: user!.username,
+          need: 'admin',
         });
-        if (!client) throw badRequest(`your GitHub account cannot access ${fullName}`);
+        if (!client) {
+          throw badRequest(`${account.login} needs admin access to ${fullName} to register a webhook`);
+        }
         try {
           return automations.ensureWebhook(fullName, user!.username, account.id, account.login);
         } catch (err) {

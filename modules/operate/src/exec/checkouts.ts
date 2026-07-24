@@ -4,8 +4,49 @@ import { rm } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { log, paths } from '@companion/services';
+import type { GitAccess, GitCredentialResolver } from '../contract/index.js';
 
 const execFileP = promisify(execFile);
+
+/** A git invocation that exited non-zero, carrying its streams for callers
+ *  (some read stdout of an expected failure, e.g. `diff --no-index`). */
+class GitCommandError extends Error {
+  constructor(
+    message: string,
+    readonly stdout: string,
+    readonly stderr: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * execFile's message is `Command failed: <the entire argv>` — which for network
+ * operations means the ephemeral credential helper ends up quoted in every
+ * user-facing error, burying git's actual complaint. Keep git's own words.
+ */
+function gitFailure(args: readonly string[], err: unknown): GitCommandError {
+  const e = err as { stdout?: string; stderr?: string; message?: string };
+  const stdout = e.stdout ?? '';
+  const stderr = e.stderr ?? '';
+  const detail =
+    (stderr.trim() || (e.message ?? '').replace(/^Command failed:.*$/m, '').trim() || 'git failed')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 4)
+      .join(' ');
+  // The subcommand, skipping leading `-c key=value` pairs.
+  const verb = args.find((arg, i) => !arg.startsWith('-') && args[i - 1] !== '-c') ?? 'command';
+  return new GitCommandError(`git ${verb} failed: ${redactSecrets(detail)}`, stdout, stderr);
+}
+
+/** git may echo a remote URL back; never let a credential in one reach a UI. */
+function redactSecrets(text: string): string {
+  return text
+    .replace(/(gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, '$1***')
+    .replace(/\/\/[^/@\s]+@/g, '//***@');
+}
 
 /**
  * Companion-owned clones + one git worktree per agent run. The user's own
@@ -25,18 +66,25 @@ export class Checkouts {
   private readonly locks = new Map<string, Promise<unknown>>();
 
   /**
-   * The thunk resolves per repo and profile and may be async because access is
-   * probed at GitHub. Only network operations resolve it.
+   * The thunk resolves per repo, profile and required access, and may be async
+   * because access is probed at GitHub. Only network operations resolve it.
    */
-  constructor(
-    private readonly token: (fullName: string, username?: string | null) => Promise<string | null> | string | null,
-  ) {}
+  constructor(private readonly token: GitCredentialResolver) {}
 
   /** The explicit per-operation personal credential wins; the resolver is for local calls. */
-  private async creds(fullName: string, fallback?: string, username?: string | null): Promise<string> {
-    const credential = fallback?.trim() || (await this.token(fullName, username)) || null;
+  private async creds(
+    fullName: string,
+    fallback?: string,
+    username?: string | null,
+    access: GitAccess = 'read',
+  ): Promise<string> {
+    const credential = fallback?.trim() || (await this.token(fullName, username, access)) || null;
     if (!credential) {
-      throw new Error(`no personal GitHub credential with access to ${fullName}`);
+      throw new Error(
+        access === 'write'
+          ? `no personal GitHub credential with push access to ${fullName} — connect an account with write access, or ask the repository owner to grant it`
+          : `no personal GitHub credential with access to ${fullName}`,
+      );
     }
     return credential;
   }
@@ -230,7 +278,7 @@ export class Checkouts {
       this.git(
         ['push', '--quiet', 'origin', `HEAD:refs/heads/${branch}`],
         worktree,
-        await this.creds(fullName, token, username),
+        await this.creds(fullName, token, username, 'write'),
       ),
     );
   }
@@ -250,7 +298,7 @@ export class Checkouts {
     return patch;
   }
 
-  private git(
+  private async git(
     args: string[],
     cwd: string | undefined,
     /** Already-resolved credential (network operations only — see creds()). */
@@ -269,15 +317,19 @@ export class Checkouts {
           'credential.helper=!f() { echo "username=x-access-token"; echo "password=$COMPANION_GH_TOKEN"; }; f',
         ]
       : [];
-    return execFileP('git', [...cred, ...args], {
-      cwd,
-      maxBuffer: 32 * 1024 * 1024,
-      env: {
-        ...process.env,
-        ...(token ? { COMPANION_GH_TOKEN: token } : {}),
-        GIT_TERMINAL_PROMPT: '0',
-      },
-    });
+    try {
+      return await execFileP('git', [...cred, ...args], {
+        cwd,
+        maxBuffer: 32 * 1024 * 1024,
+        env: {
+          ...process.env,
+          ...(token ? { COMPANION_GH_TOKEN: token } : {}),
+          GIT_TERMINAL_PROMPT: '0',
+        },
+      });
+    } catch (err) {
+      throw gitFailure(args, err);
+    }
   }
 
   private locked<T>(fullName: string, fn: () => Promise<T>): Promise<T> {

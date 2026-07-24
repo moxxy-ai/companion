@@ -50,12 +50,26 @@ export interface GithubTokenSource {
   /**
    * Token for network git operations, resolved per repo and optional owning
    * user; null = none configured. May be async — an access-verified resolver
-   * probes GitHub to pick an account that can actually see the repo.
+   * probes GitHub to pick an account that can actually reach the repo.
+   *
+   * `access` states what the operation needs: reading (clone/fetch) accepts any
+   * account that can see the repo, 'write' (push) demands one that may push, so
+   * a read-only account is never handed to git only to 403 mid-push.
    */
-  tokenFor(repo?: string, username?: string | null): string | null | Promise<string | null>;
+  tokenFor(repo?: string, username?: string | null, access?: GitAccess): string | null | Promise<string | null>;
   /** Login of the default posting account, when known (feeds /api/status). */
   login?(): string | null;
 }
+
+/** Reach a git network operation needs from the credential it is given. */
+export type GitAccess = 'read' | 'write';
+
+/** The resolver shape the execution plane passes around internally. */
+export type GitCredentialResolver = (
+  repo: string,
+  username?: string | null,
+  access?: GitAccess,
+) => Promise<string | null> | string | null;
 
 // ---------- runs ----------
 

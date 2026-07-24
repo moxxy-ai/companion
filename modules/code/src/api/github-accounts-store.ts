@@ -98,7 +98,39 @@ export class GithubAccountsStore {
 
   delete(id: string): void {
     this.db.prepare(`DELETE FROM github_account_workspaces WHERE account_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM repo_account_bindings WHERE account_id = ?`).run(id);
     this.db.prepare(`DELETE FROM github_accounts WHERE id = ?`).run(id);
+  }
+
+  // ---------- per-repo bindings ----------
+
+  /** The account this owner chose to act with on this repo, if any. */
+  binding(repo: string, ownerId: string): string | null {
+    const row = this.db
+      .prepare(`SELECT account_id FROM repo_account_bindings WHERE repo = ? AND owner_id = ?`)
+      .get(repo, ownerId) as { account_id: string } | undefined;
+    return row?.account_id ?? null;
+  }
+
+  /** Every binding this owner has, keyed by repo — one query for a repo list. */
+  bindingsFor(ownerId: string): Map<string, string> {
+    const rows = this.db
+      .prepare(`SELECT repo, account_id FROM repo_account_bindings WHERE owner_id = ?`)
+      .all(ownerId) as Array<{ repo: string; account_id: string }>;
+    return new Map(rows.map((r) => [r.repo, r.account_id]));
+  }
+
+  setBinding(repo: string, ownerId: string, accountId: string | null): void {
+    if (accountId === null) {
+      this.db.prepare(`DELETE FROM repo_account_bindings WHERE repo = ? AND owner_id = ?`).run(repo, ownerId);
+      return;
+    }
+    this.db
+      .prepare(
+        `INSERT INTO repo_account_bindings (repo, owner_id, account_id, created_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(repo, owner_id) DO UPDATE SET account_id = excluded.account_id`,
+      )
+      .run(repo, ownerId, accountId, Date.now());
   }
 
   /** Legacy broad helper; request routes pass the current profile's logins explicitly. */

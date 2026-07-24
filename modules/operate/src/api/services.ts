@@ -1,7 +1,7 @@
 import { defineServices } from '@companion/core/server';
 import type { SpaServerMessage } from '@companion/contracts';
 import { paths } from '@companion/services';
-import type { GithubTokenSource } from '../contract/index.js';
+import type { GitCredentialResolver, GithubTokenSource } from '../contract/index.js';
 import { detectMoxxyCli, MIN_MOXXY_VERSION } from '../exec/cli.js';
 import { healCredentialLinks, seedPermissionDenyRules } from '../exec/home.js';
 import { Checkouts } from '../exec/checkouts.js';
@@ -44,8 +44,8 @@ export default defineServices(async (ctx) => {
   const tokenSource: { current: GithubTokenSource } = {
     current: { tokenFor: () => null },
   };
-  const githubTokenFor = async (repo: string, username?: string | null): Promise<string | null> =>
-    (await tokenSource.current.tokenFor(repo, username)) ?? null;
+  const githubTokenFor: GitCredentialResolver = async (repo, username, access) =>
+    (await tokenSource.current.tokenFor(repo, username, access)) ?? null;
 
   // run.changed fans out to browsers AND to the server bus, replacing the
   // legacy composition root's hard-coded proposals forward-ref: reacting
