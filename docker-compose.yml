@@ -8,7 +8,7 @@ services:
     image: companion:local
     restart: unless-stopped
     ports:
-      - "8901:8901"
+      - "${COMPANION_HOST_PORT:-8901}:8901"
     env_file:
       # Optional — Coolify and friends inject env through their own UI instead.
       - path: .env
