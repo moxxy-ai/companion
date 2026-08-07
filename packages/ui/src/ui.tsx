@@ -1058,6 +1058,8 @@ export function FilterField({ label, children }: { label: string; children: Reac
 export interface MenuAction {
   label: string;
   onSelect?: () => void;
+  /** Drawn before the label at menu-icon size; for marks that identify a target. */
+  icon?: ReactNode;
   /** Renders as a link (external ones get ↗ and a new tab). */
   href?: string;
   external?: boolean;
@@ -1067,6 +1069,12 @@ export interface MenuAction {
 
 const MENU_ITEM_CLASS =
   'flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] outline-none hover:bg-zinc-100 focus:bg-zinc-100 disabled:cursor-default disabled:opacity-50 dark:hover:bg-zinc-800 dark:focus:bg-zinc-800';
+
+/** Sizes whatever a caller hands over, so a mark drawn for a 40px tile fits a menu row. */
+function MenuItemIcon({ icon }: { icon?: ReactNode }): JSX.Element | null {
+  if (!icon) return null;
+  return <span className="flex size-4 shrink-0 items-center justify-center [&_svg]:size-4">{icon}</span>;
+}
 
 /** Shared item list for ActionMenu and ContextMenu. */
 function MenuItems({ actions, onClose }: { actions: MenuAction[]; onClose: () => void }): JSX.Element {
@@ -1083,6 +1091,7 @@ function MenuItems({ actions, onClose }: { actions: MenuAction[]; onClose: () =>
             rel={a.external ? 'noreferrer' : undefined}
             onClick={onClose}
           >
+            <MenuItemIcon icon={a.icon} />
             {a.label}
             {a.external ? <span aria-hidden>↗</span> : null}
           </a>
@@ -1098,6 +1107,7 @@ function MenuItems({ actions, onClose }: { actions: MenuAction[]; onClose: () =>
               a.onSelect?.();
             }}
           >
+            <MenuItemIcon icon={a.icon} />
             {a.label}
           </button>
         ),

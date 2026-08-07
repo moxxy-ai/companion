@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useAuth } from '@companion/module-core/client';
 import { AgentActivity, LaneNote } from '@companion/module-operate/client';
-import { ReviewProviderSelect } from '@companion/module-integrations/client';
+import { ProviderIcon, ReviewProviderSelect, useReviewTargets } from '@companion/module-integrations/client';
 import type { IntegrationTargetRef } from '@companion/module-integrations/contract';
 import { Slot } from '@moxxy/companion-sdk/client';
 import {
@@ -312,11 +312,23 @@ function PrHeader({ pr, data, mode }: { pr: PrRecord; data: UsePr; mode: Mode })
   const [runningPipeline, setRunningPipeline] = useState(false);
   const [runningAgent, setRunningAgent] = useState(false);
   const review = mode === 'review';
+  const reviewers = useReviewTargets(
+    data.workspaceId
+      ? { kind: 'repository', workspaceId: data.workspaceId, repo: pr.repo }
+      : { kind: 'instance' },
+  );
 
   const aiActions: MenuAction[] = [];
   if (data.canReview) {
+    const routed = reviewers.route?.targets[0];
+    const routedLabel = routed
+      ? reviewers.options.find((option) => option.target.providerId === routed.providerId)?.label
+      : null;
     aiActions.push({
-      label: data.analyzing ? 'Reviewing…' : data.review ? 'Re-run review' : 'Run review',
+      label:
+        (data.analyzing ? 'Reviewing…' : data.review ? 'Re-run review' : 'Run review') +
+        (routedLabel && reviewers.options.length > 1 ? ` · ${routedLabel}` : ''),
+      icon: routed ? <ProviderIcon providerId={routed.providerId} /> : undefined,
       disabled: data.analyzing,
       onSelect: () => void data.analyze({ depth: 'in-depth' }),
     });
@@ -325,6 +337,19 @@ function PrHeader({ pr, data, mode }: { pr: PrRecord; data: UsePr; mode: Mode })
       disabled: data.analyzing,
       onSelect: () => void data.analyze({ depth: 'high-level' }),
     });
+    // Every reviewer this repository can reach, by name: which one the route
+    // picks is a setting elsewhere, and asking a second one for a second
+    // opinion should not mean going and changing that setting first.
+    if (reviewers.options.length > 1) {
+      for (const option of reviewers.options) {
+        aiActions.push({
+          label: `${option.label}: run review`,
+          icon: <ProviderIcon providerId={option.target.providerId} />,
+          disabled: data.analyzing,
+          onSelect: () => void data.analyze({ depth: 'in-depth', provider: option.target }),
+        });
+      }
+    }
   }
   if (data.canUseAgents) {
     if (pr.state === 'open' && pr.checks?.state === 'failing') {
