@@ -4,15 +4,21 @@ import { Slot } from '@moxxy/companion-sdk/client';
 import { useAuth } from '@companion/module-core/client';
 import { useWorkspace } from '@companion/module-workspace/client';
 import {
+  ContextMenu,
+  type ContextMenuState,
   EmptyState,
   ErrorBar,
   Field,
   FormActions,
+  IconButton,
+  KebabIcon,
+  type MenuAction,
   MetaSignal,
   Modal,
   Page,
   PageHeader,
   PageLoading,
+  SearchInput,
   Section,
   SegmentedControl,
   Switch,
@@ -32,6 +38,7 @@ import type {
 } from '../../contract/index.js';
 import { integrationsApi } from '../api.js';
 import { useIntegrations } from '../hooks/useIntegrations.js';
+import { ProviderIcon } from '../ProviderIcon.js';
 import { decodeIntegrationTarget, encodeIntegrationTarget, reviewTargetOptions } from '../review-targets.js';
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -52,6 +59,7 @@ export function IntegrationsPage(): JSX.Element {
     connection?: IntegrationConnectionRecord;
   } | null>(null);
   const [reviewDefaults, setReviewDefaults] = useState(false);
+  const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const { confirmDanger, confirmElement } = useConfirm();
   const reviewScope: IntegrationScope = current
     ? { kind: 'workspace', workspaceId: current.id }
@@ -79,20 +87,57 @@ export function IntegrationsPage(): JSX.Element {
       connection.scope.kind === 'instance' ||
       (connection.scope.kind === 'workspace' && connection.scope.workspaceId === current?.id),
   );
-  const availableProviderIds = new Set(state.catalog.providers.map((provider) => provider.id));
-  const unavailableConnections = pageConnections.filter(
-    (connection) => !availableProviderIds.has(connection.providerId),
-  );
-  const connected = pageConnections.filter(
-    (connection) => connection.enabled && availableProviderIds.has(connection.providerId),
+  const catalog = state.catalog;
+  const providerOf = new Map(catalog.providers.map((provider) => [provider.id, provider]));
+  const canManage = can('integrations:manage');
+  const canSelf = can('integrations:self');
+  const enabled = pageConnections.filter(
+    (connection) => connection.enabled && providerOf.has(connection.providerId),
   ).length;
   const attention = pageConnections.filter(
     (connection) =>
-      !availableProviderIds.has(connection.providerId) ||
+      !providerOf.has(connection.providerId) ||
       connection.health.status === 'unavailable' ||
       connection.health.status === 'degraded',
   ).length;
-  const categories = [...new Set(state.catalog.providers.map((provider) => provider.category))];
+  const categories = [...new Set(catalog.providers.map((provider) => provider.category))];
+
+  const remove = (connection: IntegrationConnectionRecord): void =>
+    void (async () => {
+      const ok = await confirmDanger({
+        title: `Remove “${connection.name}”?`,
+        message: 'Its credentials are deleted and any routing fallback that points to it is removed.',
+        confirmLabel: 'Remove connection',
+      });
+      if (ok) await state.remove(connection.id, connection.ownerId !== null);
+    })().catch(() => undefined);
+
+  /**
+   * Everything a connection can do beyond its on/off switch. Testing and
+   * editing need the provider's module, which a disabled one no longer has, so
+   * a stranded connection is left with the one action that still means
+   * something.
+   */
+  const connectionActions = (connection: IntegrationConnectionRecord): MenuAction[] => {
+    const provider = providerOf.get(connection.providerId);
+    const personal = connection.ownerId !== null;
+    if (!(personal ? canSelf : canManage)) return [];
+    const busy = state.busy !== null;
+    return [
+      ...(provider
+        ? [
+            {
+              label: 'Test connection',
+              disabled: busy,
+              onSelect: () => void state.test(connection.id, personal).catch(() => undefined),
+            },
+            { label: 'Edit connection', disabled: busy, onSelect: () => setEditing({ provider, connection }) },
+          ]
+        : []),
+      ...(provider?.docsUrl ? [{ label: 'Provider docs', href: provider.docsUrl, external: true }] : []),
+      { label: 'Remove', danger: true, disabled: busy, onSelect: () => remove(connection) },
+    ];
+  };
 
   return (
     <Page>
@@ -110,118 +155,79 @@ export function IntegrationsPage(): JSX.Element {
       />
       <ErrorBar error={state.error} />
 
-      <div className="mb-5 grid gap-3 sm:grid-cols-3">
-        <SummaryStat label="Providers available" value={state.catalog.providers.length} />
-        <SummaryStat label="Connections enabled" value={connected} tone={connected > 0 ? 'green' : 'zinc'} />
-        <SummaryStat label="Needs attention" value={attention} tone={attention > 0 ? 'amber' : 'zinc'} />
-      </div>
-
-      <div className="mb-5 flex flex-wrap items-center gap-2">
-        <input
-          className="input min-w-52 flex-1"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search providers and capabilities…"
-          aria-label="Search integrations"
-        />
-        <div className="flex flex-wrap gap-1" aria-label="Integration category">
-          <FilterButton selected={category === 'all'} onClick={() => setCategory('all')}>All</FilterButton>
-          {categories.map((value) => (
-            <FilterButton key={value} selected={category === value} onClick={() => setCategory(value)}>
-              {CATEGORY_LABELS[value] ?? value}
-            </FilterButton>
-          ))}
-        </div>
-      </div>
-
-      {providers.length === 0 ? (
-        <EmptyState title="No matching integrations" hint="Clear the search or choose another capability group." />
-      ) : (
-        <div className="card divide-y divide-zinc-200 overflow-hidden p-0 dark:divide-zinc-800">
-          {providers.map((provider) => {
-            const connections = pageConnections.filter((connection) => connection.providerId === provider.id);
-            return (
-              <ProviderCard
-                key={provider.id}
-                provider={provider}
-                connections={connections}
-                can={can}
-                canManage={can('integrations:manage')}
-                canSelf={can('integrations:self')}
-                workspaceName={current?.name ?? null}
-                canConnectHere={
-                  provider.scopes.includes('instance') ||
-                  (!!current && provider.scopes.includes('workspace'))
-                }
-                busy={state.busy}
-                onConnect={() => setEditing({ provider })}
-                onEdit={(connection) => setEditing({ provider, connection })}
-                onToggle={(connection, enabled) =>
-                  void state.update(connection.id, { enabled }, connection.ownerId !== null).catch(() => undefined)
-                }
-                onTest={(connection) =>
-                  void state.test(connection.id, connection.ownerId !== null).catch(() => undefined)
-                }
-                onRemove={(connection) =>
-                  void (async () => {
-                    const ok = await confirmDanger({
-                      title: `Remove “${connection.name}”?`,
-                      message: 'Its credentials are deleted and any routing fallback that points to it is removed.',
-                      confirmLabel: 'Remove connection',
-                    });
-                    if (ok) await state.remove(connection.id, connection.ownerId !== null);
-                  })().catch(() => undefined)
-                }
-              />
-            );
-          })}
-        </div>
-      )}
-
-      {unavailableConnections.length > 0 ? (
+      {pageConnections.length > 0 ? (
         <Section
-          title="Provider unavailable"
-          description="These credentials are preserved while their provider module is disabled. Re-enable the module to use or edit them, or remove the connection here."
+          title="Your connections"
+          description={
+            `${enabled} of ${pageConnections.length} enabled` +
+            (attention > 0 ? ` · ${attention} need${attention === 1 ? 's' : ''} attention` : '')
+          }
         >
-          <div className="card divide-y divide-zinc-200 overflow-hidden p-0 dark:divide-zinc-800">
-            {unavailableConnections.map((connection) => {
-              const manageable = connection.ownerId !== null
-                ? can('integrations:self')
-                : can('integrations:manage');
-              return (
-                <div key={connection.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <strong className="text-sm">{connection.name}</strong>
-                      <MetaSignal tone="amber" label="provider disabled" />
-                      {connection.ownerId ? <MetaSignal tone="zinc" label="just you" /> : null}
-                    </div>
-                    <p className="dim mt-1 text-xs">
-                      {connection.providerId} · {scopeLabel(connection.scope, current?.name)}
-                    </p>
-                  </div>
-                  {manageable ? (
-                    <button
-                      className="btn-ghost text-red-600 dark:text-red-400"
-                      disabled={state.busy !== null}
-                      onClick={() => void (async () => {
-                        const ok = await confirmDanger({
-                          title: `Remove “${connection.name}”?`,
-                          message: 'Its preserved credentials and any routing references are deleted.',
-                          confirmLabel: 'Remove connection',
-                        });
-                        if (ok) await state.remove(connection.id, connection.ownerId !== null);
-                      })().catch(() => undefined)}
-                    >
-                      Remove
-                    </button>
-                  ) : null}
-                </div>
-              );
-            })}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {pageConnections.map((connection) => (
+              <ConnectionCard
+                key={connection.id}
+                connection={connection}
+                provider={providerOf.get(connection.providerId) ?? null}
+                can={can}
+                workspaceName={current?.name ?? null}
+                busy={state.busy === connection.id}
+                canToggle={connection.ownerId !== null ? canSelf : canManage}
+                actions={connectionActions(connection)}
+                onToggle={(value) =>
+                  void state.update(connection.id, { enabled: value }, connection.ownerId !== null).catch(
+                    () => undefined,
+                  )
+                }
+                onMenu={setMenu}
+              />
+            ))}
           </div>
         </Section>
       ) : null}
+
+      <Section
+        title="Add an integration"
+        description="Everything this instance can talk to. A provider can hold more than one connection."
+      >
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <SearchInput
+            className="min-w-52 flex-1"
+            value={query}
+            onChange={setQuery}
+            placeholder="Search providers and capabilities…"
+            ariaLabel="Search integrations"
+          />
+          <div className="flex flex-wrap gap-1" aria-label="Integration category">
+            <FilterButton selected={category === 'all'} onClick={() => setCategory('all')}>All</FilterButton>
+            {categories.map((value) => (
+              <FilterButton key={value} selected={category === value} onClick={() => setCategory(value)}>
+                {CATEGORY_LABELS[value] ?? value}
+              </FilterButton>
+            ))}
+          </div>
+        </div>
+
+        {providers.length === 0 ? (
+          <EmptyState title="No matching integrations" hint="Clear the search or choose another capability group." />
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {providers.map((provider) => (
+              <CatalogTile
+                key={provider.id}
+                provider={provider}
+                connections={pageConnections.filter((connection) => connection.providerId === provider.id)}
+                can={can}
+                canConnectHere={
+                  provider.scopes.includes('instance') || (!!current && provider.scopes.includes('workspace'))
+                }
+                canConnect={canManage || (canSelf && provider.supportsPersonal === true)}
+                onConnect={() => setEditing({ provider })}
+              />
+            ))}
+          </div>
+        )}
+      </Section>
 
       {reviewDefaults ? (
         <ReviewDefaultsModal
@@ -260,6 +266,7 @@ export function IntegrationsPage(): JSX.Element {
           }}
         />
       ) : null}
+      <ContextMenu menu={menu} onClose={() => setMenu(null)} />
       {confirmElement}
     </Page>
   );
@@ -406,16 +413,6 @@ function ReviewDefaultsModal({
   );
 }
 
-function SummaryStat({ label, value, tone = 'zinc' }: { label: string; value: number; tone?: 'zinc' | 'green' | 'amber' }): JSX.Element {
-  const color = tone === 'green' ? 'text-emerald-600 dark:text-emerald-400' : tone === 'amber' ? 'text-amber-600 dark:text-amber-400' : '';
-  return (
-    <div className="card flex items-baseline justify-between gap-3 py-3">
-      <span className="dim text-xs">{label}</span>
-      <strong className={`text-xl tabular-nums ${color}`}>{value}</strong>
-    </div>
-  );
-}
-
 function FilterButton({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: React.ReactNode }): JSX.Element {
   return (
     <button className={selected ? 'btn' : 'btn-ghost'} onClick={onClick} aria-pressed={selected}>
@@ -424,159 +421,207 @@ function FilterButton({ selected, onClick, children }: { selected: boolean; onCl
   );
 }
 
-function ProviderCard({
+const HEALTH_TONE: Record<IntegrationConnectionRecord['health']['status'], 'green' | 'amber' | 'red' | 'zinc'> = {
+  ready: 'green',
+  degraded: 'amber',
+  unavailable: 'red',
+  checking: 'zinc',
+  unknown: 'zinc',
+};
+
+/**
+ * The provider's own mark, drawn by the module that owns it; initials stand in
+ * for providers with no mark, and for a connection whose module is gone and can
+ * therefore contribute nothing.
+ */
+function ProviderMark({
+  providerId,
+  label,
+  className = 'size-10',
+}: {
+  providerId: string;
+  label: string;
+  className?: string;
+}): JSX.Element {
+  return (
+    <div
+      className={`flex ${className} shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200`}
+    >
+      <ProviderIcon providerId={providerId} fallback={label.slice(0, 2).toUpperCase()} />
+    </div>
+  );
+}
+
+/**
+ * One thing you have actually set up. The switch stays on the card because it
+ * is the control people reach for; everything rarer sits behind the menu, which
+ * is what kept four buttons on every row before.
+ */
+function ConnectionCard({
+  connection,
+  provider,
+  can,
+  workspaceName,
+  busy,
+  canToggle,
+  actions,
+  onToggle,
+  onMenu,
+}: {
+  connection: IntegrationConnectionRecord;
+  /** null once its module is disabled: the credentials outlive the provider. */
+  provider: IntegrationProviderDescriptor | null;
+  can: (permission: Permission) => boolean;
+  workspaceName: string | null;
+  busy: boolean;
+  canToggle: boolean;
+  actions: MenuAction[];
+  onToggle: (enabled: boolean) => void;
+  onMenu: (menu: ContextMenuState) => void;
+}): JSX.Element {
+  return (
+    <div className="card flex flex-col gap-3">
+      <div className="flex items-start gap-3">
+        <ProviderMark
+          providerId={connection.providerId}
+          label={provider?.vendor ?? connection.providerId}
+          className="size-9"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <strong className="truncate text-sm font-medium">{connection.name}</strong>
+            {provider ? (
+              <MetaSignal
+                tone={HEALTH_TONE[connection.health.status]}
+                label={connection.health.status}
+                title={connection.health.message}
+              />
+            ) : (
+              <MetaSignal tone="amber" label="provider disabled" />
+            )}
+            {connection.ownerId ? <MetaSignal tone="zinc" label="just you" /> : null}
+          </div>
+          <p className="dim mt-1 truncate text-xs">
+            {[
+              provider?.title ?? connection.providerId,
+              scopeLabel(connection.scope, workspaceName ?? undefined),
+              connection.health.checkedAt ? `checked ${timeAgo(connection.health.checkedAt)}` : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </p>
+        </div>
+      </div>
+
+      {provider ? null : (
+        <p className="dim text-xs">
+          Its credentials are kept while the module is off. Re-enable the module to use or edit them.
+        </p>
+      )}
+
+      <div className="mt-auto flex items-center gap-1.5 border-t border-zinc-200 pt-2.5 dark:border-zinc-800">
+        <Slot
+          name={`integrations.connection.${connection.providerId}.actions`}
+          can={can}
+          props={{ providerId: connection.providerId, connectionId: connection.id }}
+        />
+        <span className="flex-1" />
+        {provider && canToggle ? (
+          <Switch
+            checked={connection.enabled}
+            onChange={onToggle}
+            disabled={busy}
+            label={`Enable ${connection.name}`}
+          />
+        ) : null}
+        {actions.length > 0 ? (
+          <IconButton
+            label={`Actions for ${connection.name}`}
+            className="-mr-1"
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              onMenu({ x: rect.right - 224, y: rect.bottom + 4, actions });
+            }}
+          >
+            <KebabIcon />
+          </IconButton>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One provider in the catalogue: what it is and the single move it offers.
+ * A provider already connected stays listed, because a second Slack channel or
+ * a second Jira site is a normal thing to want.
+ */
+function CatalogTile({
   provider,
   connections,
   can,
-  canManage,
-  canSelf,
-  workspaceName,
+  canConnect,
   canConnectHere,
-  busy,
   onConnect,
-  onEdit,
-  onToggle,
-  onTest,
-  onRemove,
 }: {
   provider: IntegrationProviderDescriptor;
   connections: readonly IntegrationConnectionRecord[];
   can: (permission: Permission) => boolean;
-  canManage: boolean;
-  canSelf: boolean;
-  workspaceName: string | null;
+  /** The viewer may create connections of this kind at all. */
+  canConnect: boolean;
+  /** This scope can hold one: some providers are workspace-only. */
   canConnectHere: boolean;
-  busy: string | null;
   onConnect: () => void;
-  onEdit: (connection: IntegrationConnectionRecord) => void;
-  onToggle: (connection: IntegrationConnectionRecord, enabled: boolean) => void;
-  onTest: (connection: IntegrationConnectionRecord) => void;
-  onRemove: (connection: IntegrationConnectionRecord) => void;
 }): JSX.Element {
-  const canConnect =
-    canConnectHere &&
-    provider.connectionMode !== 'none' &&
-    (canManage || (canSelf && provider.supportsPersonal));
+  const builtIn = provider.connectionMode === 'none';
+  const live = connections.filter((connection) => connection.enabled).length;
   return (
-    <section aria-label={provider.title}>
-      <div className="grid gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-        <div className="flex min-w-0 items-start gap-3">
-          {/* The mark belongs to the module that owns the provider, so this page
-              never imports a vendor's artwork; initials stand in for the ones
-              with no mark to draw. */}
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-sm font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
-            <Slot
-              name={`integrations.provider.${provider.id}.icon`}
-              can={can}
-              fallback={provider.vendor.slice(0, 2).toUpperCase()}
-            />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="font-semibold">{provider.title}</h2>
-              <MetaSignal tone="zinc" label={provider.execution} />
-              {provider.connectionMode === 'none' ? <MetaSignal tone="green" label="built in" /> : null}
-            </div>
-            <p className="dim mt-1 text-sm leading-relaxed">{provider.description}</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {provider.capabilities.map((capability) => (
-                <span className="chip" key={capability}>{capability.replace('-', ' ')}</span>
-              ))}
-            </div>
-            <Slot name={`integrations.provider.${provider.id}.panel`} can={can} props={{ providerId: provider.id }} />
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-          {provider.connectionMode === 'none' ? (
-            <MetaSignal tone="green" label="Ready" />
+    <div className="card flex flex-col gap-3" aria-label={provider.title}>
+      <div className="flex items-start gap-3">
+        <ProviderMark providerId={provider.id} label={provider.vendor} />
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-sm font-semibold" title={provider.title}>{provider.title}</h3>
+          {builtIn ? (
+            <MetaSignal tone="green" label="built in" />
           ) : connections.length > 0 ? (
             <MetaSignal
-              tone={connections.some((connection) => connection.enabled) ? 'green' : 'zinc'}
-              label={`${connections.filter((connection) => connection.enabled).length}/${connections.length} enabled`}
+              tone={live > 0 ? 'green' : 'zinc'}
+              label={`${connections.length} connected${live === connections.length ? '' : `, ${live} on`}`}
             />
           ) : (
-            <MetaSignal tone="zinc" label="Not connected" />
+            <span className="dim text-xs">{provider.execution}</span>
           )}
-          {provider.docsUrl ? (
-            <a className="btn-ghost" href={provider.docsUrl} target="_blank" rel="noreferrer">Docs ↗</a>
-          ) : null}
-          {canConnect ? <button className="btn" onClick={onConnect}>Connect</button> : null}
         </div>
       </div>
 
-      {connections.length > 0 ? (
-        <div className="border-t border-zinc-200 bg-zinc-50/60 dark:border-zinc-800 dark:bg-zinc-900/30">
-          {connections.map((connection) => (
-            <ConnectionRow
-              key={connection.id}
-              provider={provider}
-              connection={connection}
-              can={can}
-              workspaceName={workspaceName}
-              manage={connection.ownerId !== null ? canSelf : canManage}
-              busy={busy === connection.id}
-              onEdit={() => onEdit(connection)}
-              onToggle={(enabled) => onToggle(connection, enabled)}
-              onTest={() => onTest(connection)}
-              onRemove={() => onRemove(connection)}
-            />
-          ))}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function ConnectionRow({
-  provider,
-  connection,
-  can,
-  workspaceName,
-  manage,
-  busy,
-  onEdit,
-  onToggle,
-  onTest,
-  onRemove,
-}: {
-  provider: IntegrationProviderDescriptor;
-  connection: IntegrationConnectionRecord;
-  can: (permission: Permission) => boolean;
-  workspaceName: string | null;
-  manage: boolean;
-  busy: boolean;
-  onEdit: () => void;
-  onToggle: (enabled: boolean) => void;
-  onTest: () => void;
-  onRemove: () => void;
-}): JSX.Element {
-  const healthTone = connection.health.status === 'ready' ? 'green' : connection.health.status === 'degraded' ? 'amber' : connection.health.status === 'unavailable' ? 'red' : 'zinc';
-  return (
-    <div className="flex flex-wrap items-center gap-3 px-4 py-3 not-last:border-b not-last:border-zinc-200 dark:not-last:border-zinc-800">
-      <div className="min-w-48 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium">{connection.name}</span>
-          {connection.ownerId ? <MetaSignal tone="zinc" label="just you" /> : null}
-          <MetaSignal tone={healthTone} label={connection.health.status} title={connection.health.message} />
-        </div>
-        <p className="dim mt-1 text-xs">
-          {scopeLabel(connection.scope, workspaceName ?? undefined)}
-          {connection.health.checkedAt ? ` · checked ${timeAgo(connection.health.checkedAt)}` : ''}
-        </p>
+      <p className="dim line-clamp-2 text-xs leading-relaxed" title={provider.description}>
+        {provider.description}
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {provider.capabilities.map((capability) => (
+          <span className="chip" key={capability}>{capability.replace('-', ' ')}</span>
+        ))}
       </div>
-      <Slot
-        name={`integrations.connection.${provider.id}.actions`}
-        can={can}
-        props={{ providerId: provider.id, connectionId: connection.id }}
-      />
-      {manage ? (
-        <div className="flex items-center gap-1.5">
-          <button className="btn-ghost" disabled={busy} onClick={onTest}>Test</button>
-          <button className="btn-ghost" disabled={busy} onClick={onEdit}>Edit</button>
-          <Switch checked={connection.enabled} onChange={onToggle} disabled={busy} label={`Enable ${connection.name}`} />
-          <button className="btn-ghost text-red-600 dark:text-red-400" disabled={busy} onClick={onRemove}>Remove</button>
-        </div>
-      ) : null}
+
+      <Slot name={`integrations.provider.${provider.id}.panel`} can={can} props={{ providerId: provider.id }} />
+
+      <div className="mt-auto flex items-center gap-2 border-t border-zinc-200 pt-2.5 dark:border-zinc-800">
+        {provider.docsUrl ? (
+          <a className="dim text-xs hover:underline" href={provider.docsUrl} target="_blank" rel="noreferrer">
+            Docs ↗
+          </a>
+        ) : null}
+        <span className="flex-1" />
+        {builtIn ? (
+          <span className="dim text-xs">Nothing to connect</span>
+        ) : !canConnectHere ? (
+          <span className="dim text-xs">Select a workspace</span>
+        ) : canConnect ? (
+          <button className={connections.length > 0 ? 'btn-ghost' : 'btn'} onClick={onConnect}>
+            {connections.length > 0 ? 'Add another' : 'Connect'}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
