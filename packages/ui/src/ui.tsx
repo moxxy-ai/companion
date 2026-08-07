@@ -1070,14 +1070,18 @@ export interface MenuAction {
 const MENU_ITEM_CLASS =
   'flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] outline-none hover:bg-zinc-100 focus:bg-zinc-100 disabled:cursor-default disabled:opacity-50 dark:hover:bg-zinc-800 dark:focus:bg-zinc-800';
 
-/** Sizes whatever a caller hands over, so a mark drawn for a 40px tile fits a menu row. */
-function MenuItemIcon({ icon }: { icon?: ReactNode }): JSX.Element | null {
-  if (!icon) return null;
+/**
+ * Sizes whatever a caller hands over, so a mark drawn for a 40px tile fits a
+ * menu row. Rendered for every item once ANY item has one: a gutter on some
+ * rows and not others reads as one label being wrong, not as a missing icon.
+ */
+function MenuItemIcon({ icon }: { icon?: ReactNode }): JSX.Element {
   return <span className="flex size-4 shrink-0 items-center justify-center [&_svg]:size-4">{icon}</span>;
 }
 
 /** Shared item list for ActionMenu and ContextMenu. */
 function MenuItems({ actions, onClose }: { actions: MenuAction[]; onClose: () => void }): JSX.Element {
+  const marks = actions.some((a) => a.icon);
   return (
     <>
       {actions.map((a) =>
@@ -1091,7 +1095,7 @@ function MenuItems({ actions, onClose }: { actions: MenuAction[]; onClose: () =>
             rel={a.external ? 'noreferrer' : undefined}
             onClick={onClose}
           >
-            <MenuItemIcon icon={a.icon} />
+            {marks ? <MenuItemIcon icon={a.icon} /> : null}
             {a.label}
             {a.external ? <span aria-hidden>↗</span> : null}
           </a>
@@ -1107,7 +1111,7 @@ function MenuItems({ actions, onClose }: { actions: MenuAction[]; onClose: () =>
               a.onSelect?.();
             }}
           >
-            <MenuItemIcon icon={a.icon} />
+            {marks ? <MenuItemIcon icon={a.icon} /> : null}
             {a.label}
           </button>
         ),

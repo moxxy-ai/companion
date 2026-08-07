@@ -1,7 +1,12 @@
 import { useCallback, useState } from 'react';
 import { useAuth } from '@companion/module-core/client';
 import { AgentActivity, LaneNote } from '@companion/module-operate/client';
-import { ProviderIcon, ReviewProviderSelect, useReviewTargets } from '@companion/module-integrations/client';
+import {
+  ProviderIcon,
+  ReviewProviderSelect,
+  useProviderMarks,
+  useReviewTargets,
+} from '@companion/module-integrations/client';
 import type { IntegrationTargetRef } from '@companion/module-integrations/contract';
 import { Slot } from '@moxxy/companion-sdk/client';
 import {
@@ -312,6 +317,7 @@ function PrHeader({ pr, data, mode }: { pr: PrRecord; data: UsePr; mode: Mode })
   const [runningPipeline, setRunningPipeline] = useState(false);
   const [runningAgent, setRunningAgent] = useState(false);
   const review = mode === 'review';
+  const hasMark = useProviderMarks();
   const reviewers = useReviewTargets(
     data.workspaceId
       ? { kind: 'repository', workspaceId: data.workspaceId, repo: pr.repo }
@@ -328,7 +334,7 @@ function PrHeader({ pr, data, mode }: { pr: PrRecord; data: UsePr; mode: Mode })
       label:
         (data.analyzing ? 'Reviewing…' : data.review ? 'Re-run review' : 'Run review') +
         (routedLabel && reviewers.options.length > 1 ? ` · ${routedLabel}` : ''),
-      icon: routed ? <ProviderIcon providerId={routed.providerId} /> : undefined,
+      icon: routed && hasMark(routed.providerId) ? <ProviderIcon providerId={routed.providerId} /> : undefined,
       disabled: data.analyzing,
       onSelect: () => void data.analyze({ depth: 'in-depth' }),
     });
@@ -344,7 +350,9 @@ function PrHeader({ pr, data, mode }: { pr: PrRecord; data: UsePr; mode: Mode })
       for (const option of reviewers.options) {
         aiActions.push({
           label: `${option.label}: run review`,
-          icon: <ProviderIcon providerId={option.target.providerId} />,
+          icon: hasMark(option.target.providerId) ? (
+            <ProviderIcon providerId={option.target.providerId} />
+          ) : undefined,
           disabled: data.analyzing,
           onSelect: () => void data.analyze({ depth: 'in-depth', provider: option.target }),
         });

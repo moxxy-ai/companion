@@ -6,7 +6,7 @@ import { routes } from './routes.js';
 import { slots } from './slots.js';
 
 export { integrationsApi } from './api.js';
-export { ProviderIcon } from './ProviderIcon.js';
+export { ProviderIcon, useProviderMarks } from './ProviderIcon.js';
 export { useIntegrations } from './hooks/useIntegrations.js';
 export {
   ReviewProviderSelect,
