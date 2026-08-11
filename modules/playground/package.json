@@ -41,7 +41,7 @@
     "@types/react": "^18.3.12",
     "@moxxy/companion-services": "workspace:*",
     "react": "^18.3.1",
-    "typescript": "^5.8.0"
+    "typescript": "^7.0.2"
   },
   "sideEffects": false
 }
