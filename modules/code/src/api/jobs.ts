@@ -3,7 +3,7 @@ import type { TokenRefreshResult } from './github-accounts.js';
 import { PrReviewsStore } from './pr-reviews-store.js';
 import { TriageStore } from './triage-store.js';
 import { PipelinesStore } from './pipelines-store.js';
-import { createPrStatusScopeResolver, createStepOutputScopeResolver } from './ws-scope.js';
+import { createRepoScopeResolver, createStepOutputScopeResolver } from './ws-scope.js';
 
 const DAY_MS = 24 * 60 * 60_000;
 
@@ -99,7 +99,7 @@ export default defineJobs({
     // resolver claims, and this message carries a command's raw stdout. Team
     // members replay the scrubbed tail through the authenticated REST route.
     ctx.ws.registerScopeResolver('code.stepOutput', createStepOutputScopeResolver());
-    ctx.ws.registerScopeResolver('code.prStatus', createPrStatusScopeResolver(ctx));
+    ctx.ws.registerScopeResolver('code.repo', createRepoScopeResolver(ctx));
 
     // Git credentials for clones/worktrees/pushes and remote runner agents,
     // resolved per repo and owning profile — and
@@ -230,7 +230,7 @@ export default defineJobs({
     // children while the raw-output scope is still installed.
     await ctx.services.get('code').pipelines.shutdown();
     ctx.ws.unregisterScopeResolver('code.stepOutput');
-    ctx.ws.unregisterScopeResolver('code.prStatus');
+    ctx.ws.unregisterScopeResolver('code.repo');
     offSetupCompleted?.();
     offSetupCompleted = null;
     offNativeReviewProvider?.();

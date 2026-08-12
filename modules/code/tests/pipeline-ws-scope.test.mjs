@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createPrStatusScopeResolver, createStepOutputScopeResolver } from '../dist/api/ws-scope.js';
+import { createRepoScopeResolver, createStepOutputScopeResolver } from '../dist/api/ws-scope.js';
 
 test('raw pipeline stdout is visible only to the run owner', () => {
   const resolve = createStepOutputScopeResolver();
@@ -35,7 +35,7 @@ test('PR status patches require both PR permission and workspace access', () => 
     },
     rbac: { allows: (user, permission) => permission === 'prs:read' && user.role !== 'business' },
   };
-  const resolve = createPrStatusScopeResolver(ctx);
+  const resolve = createRepoScopeResolver(ctx);
   const scope = resolve({
     t: 'prStatus.changed',
     repo: 'private/repo',
@@ -51,5 +51,7 @@ test('PR status patches require both PR permission and workspace access', () => 
   assert.equal(scope('alice'), true);
   assert.equal(scope('bob'), false);
   assert.equal(scope('bea'), false);
-  assert.equal(resolve({ t: 'pipelineRuns.changed', repo: 'private/repo' }), null);
+  // The sibling repository signals go through the same gate; this one needs
+  // pipelines:read, which the stub grants to nobody.
+  assert.equal(resolve({ t: 'pipelineRuns.changed', repo: 'private/repo' })('alice'), false);
 });
