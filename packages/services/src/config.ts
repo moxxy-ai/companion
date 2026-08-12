@@ -155,6 +155,11 @@ export interface DaemonConfig {
    * cannot be steered by a spoofed header.
    */
   trustedProxies?: readonly string[];
+  /**
+   * Unauthenticated `/api` requests allowed per minute per client address; 0
+   * turns the budget off. Absent means the router's own default.
+   */
+  rateLimitPerMinute?: number;
 }
 
 const DEFAULTS = {
@@ -219,6 +224,7 @@ export function loadDaemonConfig(): DaemonConfig {
   }
 
   const env = resolveEnv();
+  const rateLimit = rateLimitFrom(env.COMPANION_RATE_LIMIT);
   const users = resolveUsers(env);
   scrubSeedPasswordEnvironment();
   const backupDir = env.COMPANION_BACKUP_DIR?.trim() || stored.backupDir?.trim() || undefined;
@@ -247,7 +253,23 @@ export function loadDaemonConfig(): DaemonConfig {
     users,
     bootstrapToken: env.COMPANION_BOOTSTRAP_TOKEN?.trim() || undefined,
     trustedProxies: listFrom(env.COMPANION_TRUSTED_PROXIES),
+    ...(rateLimit === undefined ? {} : { rateLimitPerMinute: rateLimit }),
   };
+}
+
+/**
+ * Unlike `numberFrom`, 0 is a value here and not an absence: it is how an
+ * operator turns the budget off. A malformed setting throws rather than falling
+ * back, because someone who set this at all meant a specific number.
+ */
+function rateLimitFrom(value: string | undefined): number | undefined {
+  const raw = value?.trim();
+  if (!raw) return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) {
+    throw new Error(`Invalid COMPANION_RATE_LIMIT=${raw}; expected a non-negative whole number (0 disables it).`);
+  }
+  return n;
 }
 
 const githubHostFrom = (env: Record<string, string>, stored: StoredConfig): string =>

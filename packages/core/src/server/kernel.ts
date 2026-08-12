@@ -194,6 +194,9 @@ export class ModuleKernel {
       (e) => this.recordAudit(e),
       {
         trustedProxies: opts.config.trustedProxies,
+        ...(opts.config.rateLimitPerMinute === undefined
+          ? {}
+          : { rateLimitPerMinute: opts.config.rateLimitPerMinute }),
         observe: (routePattern, method, status) =>
           httpRequests.inc({ route: `${method} ${routePattern}`, status: `${Math.floor(status / 100)}xx` }),
       },

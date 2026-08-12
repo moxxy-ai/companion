@@ -4,6 +4,16 @@ import type { AuthUser, Authenticator, Permission, RouteAccess } from '@moxxy/co
 import { createRequestContext, runWithRequestContext, type Logger, type RequestContext } from '@moxxy/companion-services';
 import type { AuditEvent } from './capabilities.js';
 import { clientAddressFrom, forwardedHttps, TrustedProxies } from './client-address.js';
+import { RateLimiter } from './rate-limit.js';
+
+/**
+ * Unauthenticated requests per minute per address when the operator sets no
+ * budget. Generous on purpose: legitimate anonymous traffic is a login page
+ * fetching its state and posting a credential, so this sits far above real use
+ * while still capping a flood. Shared addresses (corporate NAT) are the reason
+ * it is not tighter.
+ */
+const DEFAULT_ANONYMOUS_PER_MINUTE = 240;
 
 /**
  * The typed route factory + the dynamic router. A `route({...})` value declares
@@ -194,9 +204,25 @@ function retryAfterOf(err: unknown): number | null {
   return typeof after === 'number' && after > 0 ? after : null;
 }
 
+/** 429 carrying the wait the client should honour; `retryAfter` is duck-typed by sendError. */
+export class TooManyRequests extends HttpError {
+  constructor(
+    message: string,
+    readonly retryAfter: number,
+  ) {
+    super(429, message);
+  }
+}
+
 export interface RouterOptions {
   /** IPs/CIDRs whose X-Forwarded-For is believed (COMPANION_TRUSTED_PROXIES). */
   readonly trustedProxies?: readonly string[];
+  /**
+   * Unauthenticated requests allowed per minute per client address
+   * (COMPANION_RATE_LIMIT). 0 disables it. Authenticated traffic is never
+   * limited here; see rate-limit.ts for why.
+   */
+  readonly rateLimitPerMinute?: number;
   /**
    * Called once per completed response with the matched route PATTERN (never
    * the concrete path, so metric cardinality stays bounded) and the status.
@@ -213,6 +239,7 @@ export class DynamicRouter {
   private disabled = new Map<string, readonly CompiledRoute[]>();
   private disabledFlat: readonly CompiledRoute[] = [];
   private readonly trustedProxies: TrustedProxies;
+  private readonly anonymousLimit: RateLimiter;
   private readonly observe?: (routePattern: string, method: HttpMethod, status: number) => void;
 
   constructor(
@@ -223,6 +250,7 @@ export class DynamicRouter {
     options: RouterOptions = {},
   ) {
     this.trustedProxies = new TrustedProxies(options.trustedProxies ?? []);
+    this.anonymousLimit = new RateLimiter(options.rateLimitPerMinute ?? DEFAULT_ANONYMOUS_PER_MINUTE);
     this.observe = options.observe;
   }
 
@@ -299,6 +327,14 @@ export class DynamicRouter {
         const credential = requestCredential(req);
         const token = credential.token;
         const user = this.auth.verify(token);
+        // Before the access checks, because this is the cheap flood guard and a
+        // refused caller should not also cost an RBAC walk. Unmatched paths stay
+        // outside it on purpose: they reach no handler and touch no database, so
+        // stopping that traffic is the reverse proxy's job, not ours.
+        if (!user) {
+          const retryAfter = this.anonymousLimit.check(clientAddress);
+          if (retryAfter > 0) throw new TooManyRequests('too many requests; slow down', retryAfter);
+        }
         if (Array.isArray(r.access)) {
           for (const permission of r.access as readonly Permission[]) this.auth.require(user, permission);
         } else if (r.access !== 'public') {

@@ -5,6 +5,7 @@
  */
 export * from './router.js';
 export * from './client-address.js';
+export * from './rate-limit.js';
 export * from './metrics.js';
 export * from './raw-router.js';
 export * from './service-registry.js';

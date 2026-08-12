@@ -92,6 +92,25 @@ test('seed passwords reach users and then leave the environment', () => {
   });
 });
 
+test('the anonymous request budget reads 0 as a value, not an absence', () => {
+  withHome(() => {
+    try {
+      assert.equal(loadDaemonConfig().rateLimitPerMinute, undefined, 'unset leaves the router default');
+      process.env.COMPANION_RATE_LIMIT = '0';
+      assert.equal(loadDaemonConfig().rateLimitPerMinute, 0, '0 turns the budget off rather than reading as unset');
+      process.env.COMPANION_RATE_LIMIT = '60';
+      assert.equal(loadDaemonConfig().rateLimitPerMinute, 60);
+      // Falling back silently would hand an operator a budget they did not choose.
+      process.env.COMPANION_RATE_LIMIT = 'lots';
+      assert.throws(() => loadDaemonConfig(), /expected a non-negative whole number/);
+      process.env.COMPANION_RATE_LIMIT = '-1';
+      assert.throws(() => loadDaemonConfig(), /expected a non-negative whole number/);
+    } finally {
+      delete process.env.COMPANION_RATE_LIMIT;
+    }
+  });
+});
+
 test('only explicit loopback bind names qualify', () => {
   assert.equal(isLoopbackHost('127.0.0.1'), true);
   assert.equal(isLoopbackHost('::1'), true);
