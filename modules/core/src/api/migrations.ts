@@ -320,4 +320,23 @@ export default defineMigrations([
       // origin data from historical rows would itself be an audit event.
     },
   },
+  {
+    version: 12,
+    name: 'audit_hash_chain',
+    // Append-only was a convention the application could break without leaving
+    // a mark. Each row now carries a digest over its own fields AND the digest
+    // before it, so editing or removing an entry inside the retained window
+    // breaks every link after it. Nullable: rows written before this migration
+    // have no digest and the chain simply begins at the first one that does.
+    up: (db) => {
+      try {
+        db.exec(`ALTER TABLE audit_log ADD COLUMN hash TEXT`);
+      } catch {
+        // column already exists
+      }
+    },
+    down: () => {
+      // Additive; dropping the evidence is not a rollback anyone wants.
+    },
+  },
 ]);

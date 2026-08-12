@@ -430,6 +430,15 @@ export default defineRoutes((ctx) => {
       handler: () => ctx.services.get('auditForwarder').state(),
     }),
     route({
+      // Evidence an export consumer can act on: whether the retained trail is
+      // still the one that was written. Not on the export itself, because a
+      // reader wants the verdict without streaming the whole table.
+      method: 'GET',
+      path: '/api/audit/integrity',
+      access: 'audit:read',
+      handler: () => audit.verifyChain(),
+    }),
+    route({
       // "Get our data out" as one real NDJSON stream: one bounded DB page and
       // one response chunk at a time, with HTTP backpressure.
       method: 'GET',

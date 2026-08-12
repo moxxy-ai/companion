@@ -225,6 +225,9 @@ Properties that matter for an audit:
   `COMPANION_LOG_LEVEL=warn`, so a log-based trail would be missing exactly where
   it matters.
 - A failing audit write never fails the request it is recording.
+- **Each entry commits to the one before it.** Every row carries a SHA-256 over
+  its own fields plus the previous row's digest, so editing an entry, forging a
+  digest, or removing one from the middle breaks every link after it.
 
 Read and export it over the API, behind a dedicated `audit:read` permission so a
 custom **auditor** role can read the trail and nothing else:
@@ -232,7 +235,19 @@ custom **auditor** role can read the trail and nothing else:
 ```sh
 GET /api/audit?actor=alice&since=<epoch-ms>&limit=100   # newest first, keyset-paged
 GET /api/audit/export?since=<epoch-ms>                  # NDJSON, one entry per line
+GET /api/audit/integrity                                # recompute the chain
 ```
+
+`integrity` answers `{ ok, checked, from, to, brokenAt, unchained }`: how many
+links were recomputed, over which id range, and the first row that no longer
+follows its predecessor. Be precise about what a pass means. It proves no
+retained entry was altered and none was removed from the middle. It does not
+prove the oldest retained entry is the oldest that ever existed, because
+retention deletes from the front and an attacker with database access is
+indistinguishable from it; nor does it stop someone who can write the table from
+re-chaining it wholesale. `unchained` counts the entries no digest covers.
+Forwarding to a collector off this host is what closes both gaps, which is why
+`auditForwardUrl` stays the primary control and the chain is defence in depth.
 
 Paging is keyset on `id` (pass the previous page's `nextBefore`), not OFFSET, so
 deep pages of a large trail stay cheap. The export is `application/x-ndjson`,
