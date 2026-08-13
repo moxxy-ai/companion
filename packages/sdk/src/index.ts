@@ -41,7 +41,7 @@
  * declares as `moxxy.abi` in its package.json. The daemon refuses a module built
  * against a different generation at boot, which is where a mismatch is cheap.
  */
-export const SDK_VERSION = '0.9.1'; // keep in step with package.json (checked by pnpm sdk:surface)
+export const SDK_VERSION = '0.10.0'; // keep in step with package.json (checked by pnpm sdk:surface)
 export const ABI_GENERATION = '0.x';
 
 export { defineManifest } from '@moxxy/companion-core';

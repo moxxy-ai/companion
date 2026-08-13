@@ -1,6 +1,6 @@
 {
   "name": "companion-module-hello",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "A minimal out-of-tree Companion module: one permission, one route, one table, one page.",
   "type": "module",
   "license": "MIT",
@@ -37,7 +37,7 @@
   },
   "peerDependencies": {
     "@moxxy/companion-contracts": "^0.7.0",
-    "@moxxy/companion-sdk": "^0.9.1",
+    "@moxxy/companion-sdk": "^0.10.0",
     "react": "^19.2.8",
     "zod": "^3.24.0"
   },

@@ -1,6 +1,6 @@
 {
   "name": "@moxxy/companion-runner",
-  "version": "0.13.1",
+  "version": "0.14.0",
   "description": "Companion runner agent \u2014 execute Companion's AI agent work (moxxy gateways, git worktrees, PRs) on any machine, driven by a companiond over HTTP+WebSocket.",
   "type": "module",
   "license": "MIT",
