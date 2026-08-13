@@ -40,6 +40,7 @@ import { offerBuiltinProvider, parseProviderCommand, runProviderCommand, PROVIDE
 import { withTerminal } from './terminal.js';
 import { addRepo, declinedRepos, declineRepo, detectRepo, firstWorkspaceId, trackedRepos } from './repo.js';
 import { backupDatabase, restoreDatabase } from './backup.js';
+import { rotateSecretKey } from './rotate-key.js';
 import { RUN_HELP, parseRunCommand, runRunCommand } from './runs.js';
 import {
   connectGhAccount,
@@ -63,7 +64,7 @@ const CLIENT_COMMANDS = ['module', 'provider', 'acl', 'role', 'user', 'run', 'mc
 type ClientCommand = (typeof CLIENT_COMMANDS)[number];
 
 interface CliOptions {
-  readonly command: 'start' | 'stop' | 'init' | 'connect-github' | 'backup' | 'restore' | ClientCommand;
+  readonly command: 'start' | 'stop' | 'init' | 'connect-github' | 'backup' | 'restore' | 'rotate-key' | ClientCommand;
   readonly home: string;
   readonly host?: string;
   readonly port?: number;
@@ -75,6 +76,8 @@ interface CliOptions {
   readonly background: boolean;
   /** Positional path for `backup` / `restore`. */
   readonly file?: string;
+  /** Replacement key for `rotate-key`, when the operator supplies their own. */
+  readonly newKey?: string;
 }
 
 /**
@@ -117,6 +120,7 @@ Usage:
   npx @moxxy/companion doctor           Redacted local installation diagnostics
   npx @moxxy/companion backup [file]    Snapshot the database (safe while running)
   npx @moxxy/companion restore <file>   Replace the database from a snapshot (stop first)
+  npx @moxxy/companion rotate-key       Re-encrypt stored secrets under a new key (stop first)
   npx @moxxy/companion module ...       Inspect and toggle modules (see: module --help)
   npx @moxxy/companion acl ...          Inspect the live permission grid (see: acl --help)
   npx @moxxy/companion role ...         Create and edit roles
@@ -132,6 +136,7 @@ Options:
   --with-auth      Require Companion sign-in (default: trusted loopback session)
   --github-from-gh Deprecated; active gh is connected automatically
   --verbose        Show daemon startup and diagnostic logs
+  --new-key <key>  Replacement key for rotate-key (base64url or 64 hex chars)
   -v, --version    Show the Companion version
   -h, --help       Show this help
 
@@ -213,6 +218,12 @@ async function main(): Promise<void> {
       if (!options.file) throw new Error('Which snapshot? Usage: companion restore <file>');
       await restoreDatabase(options.home, options.file, url);
     }
+    return;
+  }
+  if (options.command === 'rotate-key') {
+    process.env.COMPANION_HOME = options.home;
+    const { host, port } = resolveAddress(options);
+    await rotateSecretKey(options.home, localUrl(host, port), options.newKey ? { newKey: options.newKey } : {});
     return;
   }
   if (options.command === 'connect-github') {
@@ -599,12 +610,14 @@ function parseArgs(argv: readonly string[]): CliOptions {
   let verbose = false;
   let background = false;
   let file: string | undefined;
+  let newKey: string | undefined;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]!;
     if (CLIENT_COMMANDS.some((c) => c === arg) && command === 'start') command = arg as ClientCommand;
     else if ((arg === 'init' || arg === 'connect-github' || arg === 'stop') && command === 'start') command = arg;
-    else if ((arg === 'backup' || arg === 'restore') && command === 'start') command = arg;
+    else if ((arg === 'backup' || arg === 'restore' || arg === 'rotate-key') && command === 'start') command = arg;
+    else if (arg === '--new-key') newKey = requiredValue(argv, ++i, arg);
     // The one positional: the snapshot path these two commands operate on.
     else if ((command === 'backup' || command === 'restore') && !arg.startsWith('-') && file === undefined) file = arg;
     else if (arg === '--home') home = requiredValue(argv, ++i, arg);
@@ -622,7 +635,7 @@ function parseArgs(argv: readonly string[]): CliOptions {
     } else throw new Error(`Unknown argument: ${arg}\n\n${HELP}`);
   }
   home = isAbsolute(home) ? home : resolve(home);
-  return { command, home, host, port, open, yes, withAuth, githubFromGh, verbose, background, file };
+  return { command, home, host, port, open, yes, withAuth, githubFromGh, verbose, background, file, newKey };
 }
 
 /**

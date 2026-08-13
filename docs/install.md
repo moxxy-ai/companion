@@ -159,7 +159,9 @@ cloned repositories and worktrees, the isolated moxxy home, and daemon config.
 It also contains the generated `secret-key`. A database-only backup excludes
 that key by design, so export it to a separate protected backup or mount
 `COMPANION_SECRET_KEY_FILE` from your secret manager. A restore refuses an
-encrypted database when no matching key is available.
+encrypted database when no matching key is available. To replace that key later,
+stop the daemon and run `companion rotate-key`: swapping it by hand leaves every
+stored credential unreadable, because nothing re-encrypts them.
 
 Both container targets run the application as the unprivileged `node` account
 (uid/gid `1000`). Compose first runs a finite init service which assigns only
