@@ -31,6 +31,7 @@ await build({
     daemon: join(here, 'src/daemon.ts'),
     repair: join(here, 'src/repair.ts'),
     backup: join(here, 'src/backup.ts'),
+    'rotate-key': join(here, 'src/rotate-key.ts'),
     runs: join(here, 'src/runs.ts'),
     profile: join(here, 'src/profile.ts'),
     harnesses: join(here, 'src/harnesses.ts'),
