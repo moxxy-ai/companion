@@ -46,6 +46,10 @@ When the team grows, deploy the same application with Docker or Coolify, attach
 remote runner machines, and add organisation controls without changing the way
 developers work. See [install and deployment](docs/install.md).
 
+Want one bounded path before exploring the platform? Follow the
+[ten-minute quickstart](docs/quickstart.md) from a checked-out GitHub repository
+to a private, not-yet-published AI review.
+
 <p align="center">
   <img src="docs/media/cli.gif" alt="Companion starts locally, detects available agent runtimes, and opens the application." width="820">
 </p>
@@ -55,6 +59,14 @@ developers work. See [install and deployment](docs/install.md).
 AI coding tools are good at doing work. The hard part is giving a team one
 reliable place to decide **what should happen**, see **what actually happened**,
 and control **what may happen next**.
+
+**Companion is the self-hosted maintainer control plane for GitHub and AI
+agents: decide what work should happen, run the right agent, gather the
+evidence, enforce CI and policy, and keep a person in control of publication.**
+
+| Start as a maintainer | Start as a developer | Grow into a company deployment |
+| --- | --- | --- |
+| Turn issues, pull requests, CI and agent work into one decision queue. | Let an agent build without bypassing verification, budgets, protected branches or review. | Add OIDC, custom RBAC, audit export, GHES and private runners to the same workflow. |
 
 | Local-first | Human-controlled automation | Ready for a team |
 | --- | --- | --- |
@@ -313,6 +325,7 @@ installs a module from a registry, tarball, or directory.
 
 | | |
 | --- | --- |
+| [Ten-minute quickstart](docs/quickstart.md) | connect the current repository and inspect a private AI review |
 | [Install and deploy](docs/install.md) | npx, Docker, Coolify, and source builds |
 | [Today, AI Help, and MCP](docs/ai-help-and-mcp.md) | daily work, programmatic access, and approvals |
 | [Runners](docs/runners.md) | multi-machine execution and placement policy |

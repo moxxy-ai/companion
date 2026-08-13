@@ -51,6 +51,11 @@ npx @moxxy/companion --with-auth
 Docker and direct daemon deployments use password auth by default. Later runs
 reuse the data directory and skip initialization entirely.
 
+For a bounded first workflow, follow the
+[ten-minute quickstart](https://github.com/moxxy-ai/companion/blob/main/docs/quickstart.md)
+from a checked-out repository to an AI review that has not been posted to
+GitHub.
+
 ### Without a terminal
 
 `--background` starts the daemon as its own process, detached from the shell.
@@ -90,7 +95,13 @@ bug report without credentials, repository contents, log contents, absolute
 paths, or the active GitHub username.
 
 Run `npx @moxxy/companion init` to prepare the data directory without starting
-the server. Use Docker or a source build when you need the full module profile.
+the server. The published package contains the `full` build; first run enables
+the recommended slim module set, and every other bundled module remains
+installable from the Modules page. Set `COMPANION_PROFILE=full` on a fresh
+scripted install to enable the full first-run selection, including planning,
+contribution-quality and Playground modules. Security-sensitive modules such as
+OIDC and the built-in runtime remain explicit installs. Docker or a source build
+is needed only when you want a different compiled build profile.
 
 ## Running agents
 
@@ -135,16 +146,22 @@ companion mcp                        # safe stdio tools for an IDE agent
 - **Node.js 24 or newer** for the dashboard. Nothing is compiled at install time:
   the database is Node's built-in SQLite.
 - **git** on `PATH` for repository work.
-- **A supported agent runtime** for agent runs: one of the runtime CLIs
-  ([moxxy](https://www.npmjs.com/package/@moxxy/cli), Codex, or Claude Code) on
-  this machine, or a remote runner.
+- **An execution runtime** for agent runs: one of the runtime CLIs
+  ([moxxy](https://www.npmjs.com/package/@moxxy/cli), Codex, or Claude Code), a
+  configured Companion built-in provider, or a remote runner.
 
 ## Data and privacy
 
 Everything lives in `~/.companion`: the SQLite database, cloned repositories,
-worktrees, and an isolated moxxy home. Back it up by copying `companion.db` and
-its `-wal`. There is no telemetry, no update check and no CDN fetch on any boot
-or request path, which is what makes an air-gapped install possible.
+worktrees, and an isolated moxxy home. Use `companion backup [file]` for a
+consistent database snapshot that is safe while the daemon is running; never
+copy a live `companion.db` and its `-wal` as a backup. Protect the Companion
+secret key and the runtime/provider credential home separately, because neither
+is contained in the database snapshot. See the
+[upgrade and recovery guide](https://github.com/moxxy-ai/companion/blob/main/docs/upgrades.md)
+for the complete procedure. There is no telemetry, no update check and no CDN
+fetch on any boot or request path, which is what makes an air-gapped install
+possible when the configured Git and model infrastructure is reachable there.
 
 Companion is a **single-node appliance** by design. Execution scales horizontally
 through runners; the control plane does not. A second daemon pointed at the same

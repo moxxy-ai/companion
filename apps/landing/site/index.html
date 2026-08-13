@@ -56,22 +56,23 @@
           <p class="lab">Self-hosted · MIT · Node 24+</p>
           <h1>Your agents need somewhere to work.</h1>
           <p class="lede">
-            Companion is a local-first control plane for software teams and AI agents. It plugs into
-            GitHub and runs repositories end to end: it captures a request, turns it into a reviewed
-            plan, opens the pull request, gates it on CI, and reviews it. Every AI run happens on
-            machines you own, driven by
-            <a href="https://github.com/moxxy-ai/moxxy" rel="noopener">moxxy</a> agents.
+            Companion is the self-hosted maintainer control plane for GitHub and AI agents. Decide
+            what work should happen, run Codex, Claude Code, Moxxy or Companion's built-in runtime
+            on machines you control, gather the evidence, enforce CI and policy, and keep a person
+            in control of publication.
           </p>
           <div class="cta">
             <button class="cmd" type="button" data-copy="npx @moxxy/companion">
               <code><span class="prompt">$</span> npx @moxxy/companion</code>
               <span class="copy-state" aria-live="polite">Copy</span>
             </button>
+            <a class="ghost" href="https://github.com/moxxy-ai/companion/blob/main/docs/quickstart.md" rel="noopener">10-minute quickstart</a>
             <a class="ghost" href="https://github.com/moxxy-ai/companion" rel="noopener">Read the source</a>
           </div>
           <p class="fine">
-            First launch picks an admin, starts on <code>127.0.0.1:8901</code> and opens the browser.
-            Nothing leaves the machine.
+            Local first launch opens a trusted superadmin session on <code>127.0.0.1:8901</code>;
+            there is no account wizard. Control-plane state stays local. Repository and agent
+            workflows reach the GitHub, model, runner, and integration endpoints you configure.
           </p>
         </div>
 
@@ -152,17 +153,18 @@ Companion is ready: http://127.0.0.1:8901</code></pre>
       <section class="shell split" id="self-hosted">
         <div>
           <p class="lab">Self-hosted, and it means it</p>
-          <h2>Your tokens never leave your daemon.</h2>
+          <h2>Your control plane stays on your infrastructure.</h2>
           <p class="lede">
-            Companion is one process, one SQLite file and a data directory. GitHub tokens are held by
-            the daemon and never sent to the browser. Every REST route declares the permission it
-            requires, and the interface hides whatever the signed-in role cannot use.
+            Companion is one process, one SQLite file and a data directory. Stored secrets are never
+            returned to the browser; connections to GitHub, model providers, runners and delivery
+            integrations are explicit and operator-configured. Every REST route declares the
+            permission it requires, and the interface hides what the signed-in role cannot use.
           </p>
         </div>
         <ul class="facts">
           <li><b>Three roles built in</b><span>admin, maintainer and business, enforced end to end rather than in the UI.</span></li>
           <li><b>Runs on your machines</b><span>The local box, or any number of remote runners you attach with a token.</span></li>
-          <li><b>Air-gap friendly</b><span>No outbound call is required to serve the dashboard itself.</span></li>
+          <li><b>Air-gap friendly</b><span>No telemetry, update check or CDN; configured Git and model infrastructure must remain reachable.</span></li>
           <li><b>MIT licensed</b><span>Read it, fork it, run it. The source is the product.</span></li>
         </ul>
       </section>
@@ -212,8 +214,8 @@ Companion is ready: http://127.0.0.1:8901</code></pre>
           </article>
         </div>
         <p class="fine">
-          Agent runs use a supported runtime installed on the execution machine. Companion detects
-          Codex, Claude Code, and Moxxy; the dashboard starts without any of them.
+          Agent runs use a supported CLI on the execution machine or Companion's built-in runtime
+          with a provider you configure. The dashboard starts without either.
         </p>
       </section>
     </main>

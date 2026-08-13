@@ -75,9 +75,15 @@ waiting out the instance lock.
 Under a supervisor (pm2, systemd, Docker), keep using the supervisor's own start
 and stop: `stop` kills the process, and a supervisor will simply start it again.
 
-This path defaults to the `slim` module set. A full distribution belongs in a
-Docker or source build. See
-[`development.md`](development.md#build-profiles-what-ships).
+The published package is a `full` build, so every bundled module is available.
+First launch enables the recommended slim module set; install the rest later
+from the Modules page, or set `COMPANION_PROFILE=full` on a fresh scripted
+install to enable the full first-run selection, including planning,
+contribution-quality and Playground modules. OIDC, the built-in runtime and
+other security-sensitive modules remain explicit installs. A Docker or source
+build is needed only for a different compiled build profile. See
+[`development.md`](development.md#build-profiles-what-ships) for the distinction
+between what an artifact contains and what an instance has enabled.
 
 ### The first admin: wizard, or seeded from the environment
 
@@ -307,7 +313,7 @@ separates three things that look identical from outside:
 | In the build log | What it means |
 |---|---|
 | `profile 'full': 20 module(s)` | The build was right. If the optional modules are still absent, a stale container is running. |
-| `profile 'slim': 14 module(s)` | The slim build was selected. |
+| `profile 'slim': 13 module(s)` | The slim build was selected. |
 | no `profile '...'` line at all | Docker reused a cached layer, which also proves the argument never changed: a real change from `slim` to `full` invalidates that layer. |
 
 If you requested `full`, either of the latter two means the full-profile build
