@@ -48,28 +48,56 @@ export const paths = {
 };
 
 /**
+ * Where the encryption key came from. Rotation needs this: a key held in a file
+ * can be replaced in place, while one injected through the environment can only
+ * be replaced by the operator in whatever holds that environment.
+ */
+export type SecretKeySource =
+  | { readonly key: Buffer; readonly origin: 'env' }
+  | { readonly key: Buffer; readonly origin: 'file'; readonly file: string };
+
+/**
+ * Resolve the encryption key WITHOUT creating one. Returns null only when the
+ * default file is simply absent (a first boot, or an install that has never
+ * stored a secret); every other misconfiguration still throws, because silently
+ * inventing a key for an instance that already has ciphertext would present a
+ * working daemon that cannot read a single stored secret.
+ */
+export function readSecretEncryptionKey(): SecretKeySource | null {
+  const env = resolveEnv();
+  const inline = env.COMPANION_SECRET_KEY?.trim();
+  const customFile = env.COMPANION_SECRET_KEY_FILE?.trim();
+  if (inline && customFile) throw new Error('set only one of COMPANION_SECRET_KEY and COMPANION_SECRET_KEY_FILE');
+  if (inline) return { key: decodeSecretKey(inline, 'COMPANION_SECRET_KEY'), origin: 'env' };
+
+  const file = customFile || paths.secretKey();
+  try {
+    return {
+      key: decodeSecretKey(
+        readRegularTextFile(file, { maxBytes: 4_096, ...(customFile ? {} : { mode: 0o600 }) }).trim(),
+        file,
+      ),
+      origin: 'file',
+      file,
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  if (customFile) throw new Error(`COMPANION_SECRET_KEY_FILE does not exist: ${file}`);
+  return null;
+}
+
+/**
  * Load the AES key used by the default SQLite SecretStore. The key is never
  * stored in the database (or a database-only backup). Production can inject it
  * directly or mount a file; a local appliance gets an owner-only generated
  * file so secure defaults do not add setup questions.
  */
 export function loadSecretEncryptionKey(): Buffer {
-  const env = resolveEnv();
-  const inline = env.COMPANION_SECRET_KEY?.trim();
-  const customFile = env.COMPANION_SECRET_KEY_FILE?.trim();
-  if (inline && customFile) throw new Error('set only one of COMPANION_SECRET_KEY and COMPANION_SECRET_KEY_FILE');
-  if (inline) return decodeSecretKey(inline, 'COMPANION_SECRET_KEY');
+  const existing = readSecretEncryptionKey();
+  if (existing) return existing.key;
 
-  const file = customFile || paths.secretKey();
-  try {
-    return decodeSecretKey(
-      readRegularTextFile(file, { maxBytes: 4_096, ...(customFile ? {} : { mode: 0o600 }) }).trim(),
-      file,
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
-  if (customFile) throw new Error(`COMPANION_SECRET_KEY_FILE does not exist: ${file}`);
+  const file = paths.secretKey();
   const key = randomBytes(32);
   try {
     writeFileSync(file, `${key.toString('base64url')}\n`, { mode: 0o600, flag: 'wx' });
@@ -85,7 +113,8 @@ export function loadSecretEncryptionKey(): Buffer {
   }
 }
 
-function decodeSecretKey(raw: string, source: string): Buffer {
+/** Parse a 32-byte key from its base64url or hex spelling, naming the source on failure. */
+export function decodeSecretKey(raw: string, source: string): Buffer {
   const key = /^[0-9a-f]{64}$/i.test(raw) ? Buffer.from(raw, 'hex') : Buffer.from(raw, 'base64url');
   if (key.byteLength !== 32) {
     throw new Error(`${source} must encode exactly 32 bytes (base64url or 64 hex characters)`);

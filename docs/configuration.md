@@ -16,6 +16,15 @@ Companion reads real environment variables first, then `./.env`, then
 | `COMPANION_BOOTSTRAP_TOKEN` | generated file | One-time capability required to create the first password-mode administrator. Must be at least 32 characters. When omitted, an owner-only token is written to `${COMPANION_HOME}/bootstrap-token`; the file is deleted after setup. |
 | `COMPANION_SECRET_KEY` | generated file | Exactly 32 bytes encoded as base64url or 64 hex characters. Encrypts credentials in the default SQLite secret store. Prefer the file form in managed deployments. |
 | `COMPANION_SECRET_KEY_FILE` | `${COMPANION_HOME}/secret-key` | File containing the same 32-byte key. Set only one key variable. The generated default is owner-only and excluded from database-only backups. |
+
+Changing either key variable in place does **not** re-encrypt anything: the
+stored ciphertext was written under the old key, so a daemon started with a new
+one cannot read a single credential. Use `companion rotate-key` (daemon stopped)
+to decrypt with the current key and re-encrypt with the replacement in one
+transaction. A key held in a file is replaced in place, with the retired one
+kept beside it as `secret-key.pre-rotate-<timestamp>`; a key injected through
+the environment cannot be installed by the command, so pass the replacement you
+have already stored with `--new-key`.
 | `COMPANION_ADMIN_USER` / `COMPANION_ADMIN_EMAIL` / `COMPANION_ADMIN_PASSWORD` | unset | Seed admin account. Read only while the user store is empty. The password variables (admin, maintainer and business alike) are deleted from the daemon's own environment once read, so nothing it spawns (git, agent runs) inherits them; the `.env` file itself is untouched. |
 | `COMPANION_MAINTAINER_USER` / `COMPANION_MAINTAINER_PASSWORD` | unset | Optional seed maintainer account. |
 | `COMPANION_BUSINESS_USER` / `COMPANION_BUSINESS_PASSWORD` | unset | Optional seed business account. |
